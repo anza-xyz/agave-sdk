@@ -14,9 +14,13 @@ on:
         required: true
         default: "master"
         type: string
+
 permissions: {}
+
 jobs:
   check:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
