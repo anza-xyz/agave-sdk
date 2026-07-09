@@ -428,9 +428,9 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup
         with:
-          nightly-toolchain: true
-          cargo-cache-key: cargo-nightly-bench
-          cargo-cache-fallback-key: cargo-nightly
+          stable-toolchain: true
+          cargo-cache-key: cargo-stable-bench
+          cargo-cache-fallback-key: cargo-stable
 
       - name: Run benches
         run: ./scripts/test-bench.sh
