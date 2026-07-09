@@ -5,4 +5,4 @@ here="$(dirname "$0")"
 src_root="$(readlink -f "${here}/..")"
 cd "${src_root}"
 
-./cargo nightly bench -p agave-transaction-view
+cargo bench -p agave-transaction-view
