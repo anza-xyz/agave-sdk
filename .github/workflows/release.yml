@@ -112,6 +112,7 @@ jobs:
         env:
           CRATE_NAME: ${{ inputs.crate }}
 
+      - name: Generate SLSA provenance
         uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763  # v4.1.1
         env:
           NODE_OPTIONS: --max-http-header-size=32768
