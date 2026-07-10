@@ -16,8 +16,6 @@ all-features = true
 rustdoc-args = ["--cfg=docsrs"]
 
 [features]
-agave-unstable-api = []
-dev-context-only-utils = []
 
 [dependencies]
 solana-hash = { workspace = true }
@@ -32,7 +30,7 @@ solana-transaction = { workspace = true }
 
 [dev-dependencies]
 # See order-crates-for-publishing.py for using this unusual `path = "."`
-agave-transaction-view = { path = ".", features = ["agave-unstable-api", "dev-context-only-utils"] }
+agave-transaction-view = { path = "." }
 bincode = { workspace = true }
 criterion = { workspace = true }
 solana-instruction = { workspace = true }
@@ -44,10 +42,6 @@ solana-signer = { workspace = true }
 solana-system-interface = { workspace = true, features = ["wincode"] }
 solana-transaction = { workspace = true, features = ["serde", "wincode"] }
 wincode = { workspace = true }
-
-[[bench]]
-name = "bytes"
-harness = false
 
 [[bench]]
 name = "transaction_view"
