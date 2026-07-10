@@ -5,10 +5,21 @@
 
 version: 2
 updates:
-- package-ecosystem: cargo
-  directory: "/"
-  schedule:
-    interval: daily
-    time: "08:00"
-    timezone: UTC
-  open-pull-requests-limit: 0
+  - package-ecosystem: cargo
+    directories:
+      - "/"
+    schedule:
+      interval: daily
+      time: "08:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 6
+    cooldown:
+      default-days: 7
+      # crates published by anza-team bypass the cooldown
+      exclude:
+        - "solana-*"
+        - "agave-*"
+        - "spl-*"
+        - "rts-alloc"
+        - "shaq"
+        - "wincode"
