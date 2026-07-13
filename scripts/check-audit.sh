@@ -18,6 +18,11 @@ done
 
 cargo_audit_ignores=(
 )
+# A clean audit may produce no output, causing the filter to exit nonzero.
+# Temporarily disable `errexit` so we can return `cargo audit`'s status instead.
+set +e
 cargo audit "${cargo_audit_ignores[@]}" | $dep_tree_filter
 # we want the `cargo audit` exit code, not `$dep_tree_filter`'s
-exit "${PIPESTATUS[0]}"
+cargo_audit_status="${PIPESTATUS[0]}"
+set -e
+exit "${cargo_audit_status}"
