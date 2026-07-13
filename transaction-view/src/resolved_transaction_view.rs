@@ -10,7 +10,10 @@ use {
         ops::Deref,
     },
     solana_hash::Hash,
-    solana_message::{AccountKeys, v0::LoadedAddresses},
+    solana_message::{
+        AccountKeys,
+        v0::{LoadedAddresses, LoadedAddressesView},
+    },
     solana_pubkey::Pubkey,
     solana_sdk_ids::bpf_loader_upgradeable,
     solana_signature::Signature,
@@ -214,9 +217,11 @@ impl<D: TransactionData> SVMStaticMessage for ResolvedTransactionView<D> {
 
 impl<D: TransactionData> SVMMessage for ResolvedTransactionView<D> {
     fn account_keys(&self) -> AccountKeys<'_> {
-        AccountKeys::new(
+        AccountKeys::new_with_loaded_addresses_view(
             self.view.static_account_keys(),
-            self.resolved_addresses.as_ref(),
+            self.resolved_addresses
+                .as_ref()
+                .map(LoadedAddressesView::from),
         )
     }
 
