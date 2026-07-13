@@ -23,6 +23,46 @@ use {
     std::collections::HashSet,
 };
 
+const WRITABLE_CACHE_WORDS: usize = 4;
+const BITS_PER_WRITABLE_CACHE_WORD: usize = u64::BITS as usize;
+
+/// A bitset that records whether each account in a sanitized transaction is
+/// writable. Account indexes are `u8`, so four words cover the full range.
+#[derive(Default)]
+struct WritableCache([u64; WRITABLE_CACHE_WORDS]);
+
+impl WritableCache {
+    #[inline]
+    fn get(&self, index: usize) -> bool {
+        let word_index = index / BITS_PER_WRITABLE_CACHE_WORD;
+        let Some(word) = self.0.get(word_index) else {
+            return false;
+        };
+        let bit_index = index % BITS_PER_WRITABLE_CACHE_WORD;
+        word & (1_u64 << bit_index) != 0
+    }
+
+    #[inline]
+    fn set(&mut self, index: usize) {
+        let word_index = index / BITS_PER_WRITABLE_CACHE_WORD;
+        let Some(word) = self.0.get_mut(word_index) else {
+            return;
+        };
+        let bit_index = index % BITS_PER_WRITABLE_CACHE_WORD;
+        *word |= 1_u64 << bit_index;
+    }
+
+    #[inline]
+    fn clear(&mut self, index: usize) {
+        let word_index = index / BITS_PER_WRITABLE_CACHE_WORD;
+        let Some(word) = self.0.get_mut(word_index) else {
+            return;
+        };
+        let bit_index = index % BITS_PER_WRITABLE_CACHE_WORD;
+        *word &= !(1_u64 << bit_index);
+    }
+}
+
 /// A parsed and sanitized transaction view that has had all address lookups
 /// resolved.
 pub struct ResolvedTransactionView<D: TransactionData> {
@@ -33,7 +73,7 @@ pub struct ResolvedTransactionView<D: TransactionData> {
     /// A cache for whether an address is writable.
     // Sanitized transactions are guaranteed to have a maximum of 256 keys,
     // because account indexing is done with a u8.
-    writable_cache: [bool; 256],
+    writable_cache: WritableCache,
 }
 
 impl<D: TransactionData> Deref for ResolvedTransactionView<D> {
@@ -92,12 +132,12 @@ impl<D: TransactionData> ResolvedTransactionView<D> {
         view: &TransactionView<true, D>,
         resolved_addresses: Option<&LoadedAddresses>,
         reserved_account_keys: &HashSet<Pubkey>,
-    ) -> [bool; 256] {
+    ) -> WritableCache {
         // Build account keys so that we can iterate over and check if
         // an address is writable.
         let account_keys = AccountKeys::new(view.static_account_keys(), resolved_addresses);
 
-        let mut is_writable_cache = [false; 256];
+        let mut is_writable_cache = WritableCache::default();
         let num_static_account_keys = usize::from(view.num_static_account_keys());
         let num_writable_lookup_accounts = usize::from(view.total_writable_lookup_accounts());
         let num_signed_accounts = usize::from(view.num_required_signatures());
@@ -121,7 +161,9 @@ impl<D: TransactionData> ResolvedTransactionView<D> {
             };
 
             // If the key is reserved it cannot be writable.
-            is_writable_cache[index] = is_requested_write && !reserved_account_keys.contains(key);
+            if is_requested_write && !reserved_account_keys.contains(key) {
+                is_writable_cache.set(index);
+            }
         }
 
         // If a program account is locked, it cannot be writable unless the
@@ -131,7 +173,7 @@ impl<D: TransactionData> ResolvedTransactionView<D> {
         let mut is_upgradable_loader_present = None;
         for ix in view.instructions_iter() {
             let program_id_index = usize::from(ix.program_id_index);
-            if is_writable_cache[program_id_index]
+            if is_writable_cache.get(program_id_index)
                 && !*is_upgradable_loader_present.get_or_insert_with(|| {
                     for key in account_keys.iter() {
                         if key == &bpf_loader_upgradeable::ID {
@@ -141,7 +183,7 @@ impl<D: TransactionData> ResolvedTransactionView<D> {
                     false
                 })
             {
-                is_writable_cache[program_id_index] = false;
+                is_writable_cache.clear(program_id_index);
             }
         }
 
@@ -221,7 +263,7 @@ impl<D: TransactionData> SVMMessage for ResolvedTransactionView<D> {
     }
 
     fn is_writable(&self, index: usize) -> bool {
-        self.writable_cache.get(index).copied().unwrap_or(false)
+        self.writable_cache.get(index)
     }
 
     fn is_signer(&self, index: usize) -> bool {
@@ -279,6 +321,29 @@ mod tests {
             max_instructions: 64,
             max_accounts_per_instruction: Some(255),
         }
+    }
+
+    #[test]
+    fn test_writable_cache_bit_boundaries() {
+        assert_eq!(core::mem::size_of::<WritableCache>(), 32);
+
+        let mut cache = WritableCache::default();
+        for index in [0, 63, 64, 127, 128, 191, 192, 255] {
+            assert!(!cache.get(index));
+            cache.set(index);
+            assert!(cache.get(index));
+        }
+
+        for index in [0, 64, 128, 192] {
+            cache.clear(index);
+            assert!(!cache.get(index));
+        }
+        for index in [63, 127, 191, 255] {
+            assert!(cache.get(index));
+        }
+
+        assert!(!cache.get(256));
+        assert!(!cache.get(usize::MAX));
     }
 
     #[test]
