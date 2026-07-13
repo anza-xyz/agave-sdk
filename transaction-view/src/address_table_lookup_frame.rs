@@ -214,11 +214,18 @@ impl Debug for AddressTableLookupIterator<'_> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, solana_message::v0::MessageAddressTableLookup, solana_short_vec::ShortVec};
+    use {
+        super::*, solana_message::v0::MessageAddressTableLookup, solana_short_vec::ShortU16,
+        wincode::Serialize,
+    };
+
+    fn serialize_short_vec(vec: &Vec<MessageAddressTableLookup>) -> Vec<u8> {
+        wincode::containers::Vec::<MessageAddressTableLookup, ShortU16>::serialize(vec).unwrap()
+    }
 
     #[test]
     fn test_zero_atls() {
-        let bytes = bincode::serialize(&ShortVec::<MessageAddressTableLookup>(vec![])).unwrap();
+        let bytes = serialize_short_vec(&vec![]);
         let mut offset = 0;
         let frame = AddressTableLookupFrame::try_new(&bytes, &mut offset).unwrap();
         assert_eq!(frame.num_address_table_lookups, 0);
@@ -230,7 +237,7 @@ mod tests {
 
     #[test]
     fn test_length_too_high() {
-        let mut bytes = bincode::serialize(&ShortVec::<MessageAddressTableLookup>(vec![])).unwrap();
+        let mut bytes = serialize_short_vec(&vec![]);
         let mut offset = 0;
         // modify the number of atls to be too high
         bytes[0] = 5;
@@ -239,14 +246,11 @@ mod tests {
 
     #[test]
     fn test_single_atl() {
-        let bytes = bincode::serialize(&ShortVec::<MessageAddressTableLookup>(vec![
-            MessageAddressTableLookup {
-                account_key: Pubkey::new_unique(),
-                writable_indexes: vec![1, 2, 3],
-                readonly_indexes: vec![4, 5, 6],
-            },
-        ]))
-        .unwrap();
+        let bytes = serialize_short_vec(&vec![MessageAddressTableLookup {
+            account_key: Pubkey::new_unique(),
+            writable_indexes: vec![1, 2, 3],
+            readonly_indexes: vec![4, 5, 6],
+        }]);
         let mut offset = 0;
         let frame = AddressTableLookupFrame::try_new(&bytes, &mut offset).unwrap();
         assert_eq!(frame.num_address_table_lookups, 1);
@@ -258,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_multiple_atls() {
-        let bytes = bincode::serialize(&ShortVec::<MessageAddressTableLookup>(vec![
+        let bytes = serialize_short_vec(&vec![
             MessageAddressTableLookup {
                 account_key: Pubkey::new_unique(),
                 writable_indexes: vec![1, 2, 3],
@@ -269,8 +273,7 @@ mod tests {
                 writable_indexes: vec![1, 2, 3],
                 readonly_indexes: vec![4, 5],
             },
-        ]))
-        .unwrap();
+        ]);
         let mut offset = 0;
         let frame = AddressTableLookupFrame::try_new(&bytes, &mut offset).unwrap();
         assert_eq!(frame.num_address_table_lookups, 2);
@@ -282,12 +285,11 @@ mod tests {
 
     #[test]
     fn test_invalid_writable_indexes_vec() {
-        let mut bytes = bincode::serialize(&ShortVec(vec![MessageAddressTableLookup {
+        let mut bytes = serialize_short_vec(&vec![MessageAddressTableLookup {
             account_key: Pubkey::new_unique(),
             writable_indexes: vec![1, 2, 3],
             readonly_indexes: vec![4, 5, 6],
-        }]))
-        .unwrap();
+        }]);
 
         // modify the number of accounts to be too high
         bytes[33] = 127;
@@ -298,12 +300,11 @@ mod tests {
 
     #[test]
     fn test_invalid_readonly_indexes_vec() {
-        let mut bytes = bincode::serialize(&ShortVec(vec![MessageAddressTableLookup {
+        let mut bytes = serialize_short_vec(&vec![MessageAddressTableLookup {
             account_key: Pubkey::new_unique(),
             writable_indexes: vec![1, 2, 3],
             readonly_indexes: vec![4, 5, 6],
-        }]))
-        .unwrap();
+        }]);
 
         // modify the number of accounts to be too high
         bytes[37] = 127;
