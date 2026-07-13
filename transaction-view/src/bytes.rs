@@ -249,12 +249,7 @@ pub unsafe fn unchecked_copy_value<T: Sized>(bytes: &[u8], offset: usize) -> T {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        bincode::{DefaultOptions, Options, serialize_into},
-        solana_packet::PACKET_DATA_SIZE,
-        solana_short_vec::ShortU16,
-    };
+    use {super::*, solana_packet::PACKET_DATA_SIZE, solana_short_vec::ShortU16};
 
     #[test]
     fn test_check_remaining() {
@@ -291,7 +286,6 @@ mod tests {
     #[test]
     fn test_read_compressed_u16() {
         let mut buffer = [0u8; 1024];
-        let options = DefaultOptions::new().with_fixint_encoding(); // Ensure fixed-int encoding
 
         // Test all possible u16 values
         for value in 0..=u16::MAX {
@@ -299,12 +293,11 @@ mod tests {
             let short_u16 = ShortU16(value);
 
             // Serialize the value into the buffer
-            serialize_into(&mut buffer[..], &short_u16).expect("Serialization failed");
+            wincode::serialize_into(&mut buffer[..], &short_u16).expect("Serialization failed");
 
-            // Use bincode's size calculation to determine the length of the serialized data
-            let serialized_len = options
-                .serialized_size(&short_u16)
-                .expect("Failed to get serialized size");
+            // Use wincode's size calculation to determine the length of the serialized data
+            let serialized_len =
+                wincode::serialized_size(&short_u16).expect("Failed to get serialized size");
 
             // Reset offset
             offset = 0;
@@ -343,7 +336,6 @@ mod tests {
     #[test]
     fn test_optimized_read_compressed_u16() {
         let mut buffer = [0u8; 1024];
-        let options = DefaultOptions::new().with_fixint_encoding(); // Ensure fixed-int encoding
 
         // Test all possible u16 values under the packet length
         for value in 0..=PACKET_DATA_SIZE as u16 {
@@ -351,12 +343,11 @@ mod tests {
             let short_u16 = ShortU16(value);
 
             // Serialize the value into the buffer
-            serialize_into(&mut buffer[..], &short_u16).expect("Serialization failed");
+            wincode::serialize_into(&mut buffer[..], &short_u16).expect("Serialization failed");
 
-            // Use bincode's size calculation to determine the length of the serialized data
-            let serialized_len = options
-                .serialized_size(&short_u16)
-                .expect("Failed to get serialized size");
+            // Use wincode's size calculation to determine the length of the serialized data
+            let serialized_len =
+                wincode::serialized_size(&short_u16).expect("Failed to get serialized size");
 
             // Reset offset
             offset = 0;

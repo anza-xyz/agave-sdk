@@ -52,18 +52,22 @@ impl StaticAccountKeysFrame {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, solana_short_vec::ShortVec};
+    use {super::*, solana_short_vec::ShortU16, wincode::Serialize};
+
+    fn serialize_short_vec(vec: &Vec<Pubkey>) -> Vec<u8> {
+        wincode::containers::Vec::<Pubkey, ShortU16>::serialize(vec).unwrap()
+    }
 
     #[test]
     fn test_zero_accounts() {
-        let bytes = bincode::serialize(&ShortVec(Vec::<Pubkey>::new())).unwrap();
+        let bytes = serialize_short_vec(&vec![]);
         let mut offset = 0;
         assert!(StaticAccountKeysFrame::try_new(&bytes, &mut offset).is_err());
     }
 
     #[test]
     fn test_one_account() {
-        let bytes = bincode::serialize(&ShortVec(vec![Pubkey::default()])).unwrap();
+        let bytes = serialize_short_vec(&vec![Pubkey::default()]);
         let mut offset = 0;
         let frame = StaticAccountKeysFrame::try_new(&bytes, &mut offset).unwrap();
         assert_eq!(frame.num_static_accounts, 1);
@@ -73,9 +77,9 @@ mod tests {
 
     #[test]
     fn test_max_accounts() {
-        let signatures =
+        let pubkeys =
             vec![Pubkey::default(); usize::from(LEGACY_OR_V0_MAX_STATIC_ACCOUNTS_PER_PACKET)];
-        let bytes = bincode::serialize(&ShortVec(signatures)).unwrap();
+        let bytes = serialize_short_vec(&pubkeys);
         let mut offset = 0;
         let frame = StaticAccountKeysFrame::try_new(&bytes, &mut offset).unwrap();
         assert_eq!(frame.num_static_accounts, 38);
@@ -85,17 +89,17 @@ mod tests {
 
     #[test]
     fn test_too_many_accounts() {
-        let signatures =
+        let pubkeys =
             vec![Pubkey::default(); usize::from(LEGACY_OR_V0_MAX_STATIC_ACCOUNTS_PER_PACKET) + 1];
-        let bytes = bincode::serialize(&ShortVec(signatures)).unwrap();
+        let bytes = serialize_short_vec(&pubkeys);
         let mut offset = 0;
         assert!(StaticAccountKeysFrame::try_new(&bytes, &mut offset).is_err());
     }
 
     #[test]
     fn test_u16_max_accounts() {
-        let signatures = vec![Pubkey::default(); u16::MAX as usize];
-        let bytes = bincode::serialize(&ShortVec(signatures)).unwrap();
+        let pubkeys = vec![Pubkey::default(); u16::MAX as usize];
+        let bytes = serialize_short_vec(&pubkeys);
         let mut offset = 0;
         assert!(StaticAccountKeysFrame::try_new(&bytes, &mut offset).is_err());
     }

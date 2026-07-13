@@ -53,18 +53,22 @@ impl SignatureFrame {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, solana_short_vec::ShortVec};
+    use {super::*, solana_short_vec::ShortU16, wincode::Serialize};
+
+    fn serialize_short_vec(vec: &Vec<Signature>) -> Vec<u8> {
+        wincode::containers::Vec::<Signature, ShortU16>::serialize(vec).unwrap()
+    }
 
     #[test]
     fn test_zero_signatures() {
-        let bytes = bincode::serialize(&ShortVec(Vec::<Signature>::new())).unwrap();
+        let bytes = serialize_short_vec(&vec![]);
         let mut offset = 0;
         assert!(SignatureFrame::try_new(&bytes, &mut offset).is_err());
     }
 
     #[test]
     fn test_one_signature() {
-        let bytes = bincode::serialize(&ShortVec(vec![Signature::default()])).unwrap();
+        let bytes = serialize_short_vec(&vec![Signature::default()]);
         let mut offset = 0;
         let frame = SignatureFrame::try_new(&bytes, &mut offset).unwrap();
         assert_eq!(frame.num_signatures, 1);
@@ -75,7 +79,7 @@ mod tests {
     #[test]
     fn test_max_signatures() {
         let signatures = vec![Signature::default(); usize::from(MAX_SIGNATURES_PER_PACKET)];
-        let bytes = bincode::serialize(&ShortVec(signatures)).unwrap();
+        let bytes = serialize_short_vec(&signatures);
         let mut offset = 0;
         let frame = SignatureFrame::try_new(&bytes, &mut offset).unwrap();
         assert_eq!(frame.num_signatures, 12);
@@ -85,7 +89,7 @@ mod tests {
 
     #[test]
     fn test_non_zero_offset() {
-        let mut bytes = bincode::serialize(&ShortVec(vec![Signature::default()])).unwrap();
+        let mut bytes = serialize_short_vec(&vec![Signature::default()]);
         bytes.insert(0, 0); // Insert a byte at the beginning of the packet.
         let mut offset = 1; // Start at the second byte.
         let frame = SignatureFrame::try_new(&bytes, &mut offset).unwrap();
@@ -97,7 +101,7 @@ mod tests {
     #[test]
     fn test_too_many_signatures() {
         let signatures = vec![Signature::default(); usize::from(MAX_SIGNATURES_PER_PACKET) + 1];
-        let bytes = bincode::serialize(&ShortVec(signatures)).unwrap();
+        let bytes = serialize_short_vec(&signatures);
         let mut offset = 0;
         assert!(SignatureFrame::try_new(&bytes, &mut offset).is_err());
     }
@@ -105,7 +109,7 @@ mod tests {
     #[test]
     fn test_u16_max_signatures() {
         let signatures = vec![Signature::default(); u16::MAX as usize];
-        let bytes = bincode::serialize(&ShortVec(signatures)).unwrap();
+        let bytes = serialize_short_vec(&signatures);
         let mut offset = 0;
         assert!(SignatureFrame::try_new(&bytes, &mut offset).is_err());
     }

@@ -431,7 +431,7 @@ impl Debug for InstructionsIterator<'_> {
 mod tests {
     use {
         super::*, solana_message::compiled_instruction::CompiledInstruction,
-        solana_short_vec::ShortVec,
+        solana_short_vec::ShortU16, wincode::Serialize,
     };
 
     impl InstructionsFrame {
@@ -443,9 +443,13 @@ mod tests {
         }
     }
 
+    fn serialize_short_vec(vec: &Vec<CompiledInstruction>) -> Vec<u8> {
+        wincode::containers::Vec::<CompiledInstruction, ShortU16>::serialize(vec).unwrap()
+    }
+
     #[test]
     fn test_zero_instructions() {
-        let bytes = bincode::serialize(&ShortVec(Vec::<CompiledInstruction>::new())).unwrap();
+        let bytes = serialize_short_vec(&vec![]);
         let mut offset = 0;
         let instructions_frame =
             InstructionsFrame::try_new_for_legacy_and_v0(&bytes, &mut offset).unwrap();
@@ -457,12 +461,11 @@ mod tests {
 
     #[test]
     fn test_num_instructions_too_high() {
-        let mut bytes = bincode::serialize(&ShortVec(vec![CompiledInstruction {
+        let mut bytes = serialize_short_vec(&vec![CompiledInstruction {
             program_id_index: 0,
             accounts: vec![],
             data: vec![],
-        }]))
-        .unwrap();
+        }]);
         // modify the number of instructions to be too high
         bytes[0] = 0x02;
         let mut offset = 0;
@@ -471,12 +474,11 @@ mod tests {
 
     #[test]
     fn test_single_instruction() {
-        let bytes = bincode::serialize(&ShortVec(vec![CompiledInstruction {
+        let bytes = serialize_short_vec(&vec![CompiledInstruction {
             program_id_index: 0,
             accounts: vec![1, 2, 3],
             data: vec![4, 5, 6, 7, 8, 9, 10],
-        }]))
-        .unwrap();
+        }]);
         let mut offset = 0;
         let instructions_frame =
             InstructionsFrame::try_new_for_legacy_and_v0(&bytes, &mut offset).unwrap();
@@ -487,7 +489,7 @@ mod tests {
 
     #[test]
     fn test_multiple_instructions() {
-        let bytes = bincode::serialize(&ShortVec(vec![
+        let bytes = serialize_short_vec(&vec![
             CompiledInstruction {
                 program_id_index: 0,
                 accounts: vec![1, 2, 3],
@@ -498,8 +500,7 @@ mod tests {
                 accounts: vec![4, 5, 6],
                 data: vec![7, 8, 9, 10, 11, 12, 13],
             },
-        ]))
-        .unwrap();
+        ]);
         let mut offset = 0;
         let instructions_frame =
             InstructionsFrame::try_new_for_legacy_and_v0(&bytes, &mut offset).unwrap();
@@ -510,12 +511,11 @@ mod tests {
 
     #[test]
     fn test_invalid_instruction_accounts_vec() {
-        let mut bytes = bincode::serialize(&ShortVec(vec![CompiledInstruction {
+        let mut bytes = serialize_short_vec(&vec![CompiledInstruction {
             program_id_index: 0,
             accounts: vec![1, 2, 3],
             data: vec![4, 5, 6, 7, 8, 9, 10],
-        }]))
-        .unwrap();
+        }]);
 
         // modify the number of accounts to be too high
         bytes[2] = 127;
@@ -526,12 +526,11 @@ mod tests {
 
     #[test]
     fn test_invalid_instruction_data_vec() {
-        let mut bytes = bincode::serialize(&ShortVec(vec![CompiledInstruction {
+        let mut bytes = serialize_short_vec(&vec![CompiledInstruction {
             program_id_index: 0,
             accounts: vec![1, 2, 3],
             data: vec![4, 5, 6, 7, 8, 9, 10],
-        }]))
-        .unwrap();
+        }]);
 
         // modify the number of data bytes to be too high
         bytes[6] = 127;
