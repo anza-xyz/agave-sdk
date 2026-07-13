@@ -28,18 +28,21 @@ use {
 
 /// A parsed and sanitized transaction view that has had all address lookups
 /// resolved.
-pub struct ResolvedTransactionView<D: TransactionData> {
+///
+/// The address source defaults to [`LoadedAddresses`]. Other source types can
+/// be used when [`LoadedAddressesView`] implements `From<&A>` for the source.
+pub struct ResolvedTransactionView<D: TransactionData, A = LoadedAddresses> {
     /// The parsed and sanitized transaction view.
     view: TransactionView<true, D>,
     /// The resolved address lookups.
-    resolved_addresses: Option<LoadedAddresses>,
+    resolved_addresses: Option<A>,
     /// A cache for whether an address is writable.
     // Sanitized transactions are guaranteed to have a maximum of 256 keys,
     // because account indexing is done with a u8.
     writable_cache: [bool; 256],
 }
 
-impl<D: TransactionData> Deref for ResolvedTransactionView<D> {
+impl<D: TransactionData, A> Deref for ResolvedTransactionView<D, A> {
     type Target = TransactionView<true, D>;
 
     fn deref(&self) -> &Self::Target {
@@ -55,19 +58,35 @@ impl<D: TransactionData> ResolvedTransactionView<D> {
         resolved_addresses: Option<LoadedAddresses>,
         reserved_account_keys: &HashSet<Pubkey>,
     ) -> Result<Self> {
-        let resolved_addresses_ref = resolved_addresses.as_ref();
+        Self::try_new_with_source(view, resolved_addresses, reserved_account_keys)
+    }
+}
+
+impl<D: TransactionData, A> ResolvedTransactionView<D, A>
+where
+    for<'a> LoadedAddressesView<'a>: From<&'a A>,
+{
+    /// Given a parsed and sanitized transaction view, and a generic source of
+    /// resolved addresses, create a resolved transaction view.
+    pub fn try_new_with_source(
+        view: TransactionView<true, D>,
+        resolved_addresses: Option<A>,
+        reserved_account_keys: &HashSet<Pubkey>,
+    ) -> Result<Self> {
+        let resolved_addresses_view = resolved_addresses.as_ref().map(LoadedAddressesView::from);
 
         // verify that the number of readable and writable match up.
         // This is a basic sanity check to make sure we're not passing a totally
         // invalid set of resolved addresses.
         // Additionally if it is a v0 transaction it *must* have resolved
         // addresses, even if they are empty.
-        if matches!(view.version(), TransactionVersion::V0) && resolved_addresses_ref.is_none() {
+        if matches!(view.version(), TransactionVersion::V0) && resolved_addresses_view.is_none() {
             return Err(TransactionViewError::AddressLookupMismatch);
         }
-        if let Some(loaded_addresses) = resolved_addresses_ref {
-            if loaded_addresses.writable.len() != usize::from(view.total_writable_lookup_accounts())
-                || loaded_addresses.readonly.len()
+        if let Some(loaded_addresses_view) = resolved_addresses_view {
+            if loaded_addresses_view.writable.len()
+                != usize::from(view.total_writable_lookup_accounts())
+                || loaded_addresses_view.readonly.len()
                     != usize::from(view.total_readonly_lookup_accounts())
             {
                 return Err(TransactionViewError::AddressLookupMismatch);
@@ -79,7 +98,7 @@ impl<D: TransactionData> ResolvedTransactionView<D> {
         }
 
         let writable_cache =
-            Self::cache_is_writable(&view, resolved_addresses_ref, reserved_account_keys);
+            Self::cache_is_writable(&view, resolved_addresses_view, reserved_account_keys);
         Ok(Self {
             view,
             resolved_addresses,
@@ -93,12 +112,15 @@ impl<D: TransactionData> ResolvedTransactionView<D> {
     /// `is_writable` - since there is more to it than just checking index.
     fn cache_is_writable(
         view: &TransactionView<true, D>,
-        resolved_addresses: Option<&LoadedAddresses>,
+        resolved_addresses: Option<LoadedAddressesView<'_>>,
         reserved_account_keys: &HashSet<Pubkey>,
     ) -> [bool; 256] {
         // Build account keys so that we can iterate over and check if
         // an address is writable.
-        let account_keys = AccountKeys::new(view.static_account_keys(), resolved_addresses);
+        let account_keys = AccountKeys::new_with_loaded_addresses_view(
+            view.static_account_keys(),
+            resolved_addresses,
+        );
 
         let mut is_writable_cache = [false; 256];
         let num_static_account_keys = usize::from(view.num_static_account_keys());
@@ -151,16 +173,21 @@ impl<D: TransactionData> ResolvedTransactionView<D> {
         is_writable_cache
     }
 
-    pub fn loaded_addresses(&self) -> Option<&LoadedAddresses> {
-        self.resolved_addresses.as_ref()
+    /// Returns a borrowed view of the resolved addresses.
+    fn loaded_addresses_view(&self) -> Option<LoadedAddressesView<'_>> {
+        self.resolved_addresses
+            .as_ref()
+            .map(LoadedAddressesView::from)
     }
+}
 
+impl<D: TransactionData, A> ResolvedTransactionView<D, A> {
     pub fn into_view(self) -> TransactionView<true, D> {
         self.view
     }
 }
 
-impl<D: TransactionData> SVMStaticMessage for ResolvedTransactionView<D> {
+impl<D: TransactionData, A> SVMStaticMessage for ResolvedTransactionView<D, A> {
     fn version(&self) -> solana_transaction::versioned::TransactionVersion {
         self.view.version().into()
     }
@@ -215,13 +242,14 @@ impl<D: TransactionData> SVMStaticMessage for ResolvedTransactionView<D> {
     }
 }
 
-impl<D: TransactionData> SVMMessage for ResolvedTransactionView<D> {
+impl<D: TransactionData, A> SVMMessage for ResolvedTransactionView<D, A>
+where
+    for<'a> LoadedAddressesView<'a>: From<&'a A>,
+{
     fn account_keys(&self) -> AccountKeys<'_> {
         AccountKeys::new_with_loaded_addresses_view(
             self.view.static_account_keys(),
-            self.resolved_addresses
-                .as_ref()
-                .map(LoadedAddressesView::from),
+            self.loaded_addresses_view(),
         )
     }
 
@@ -243,7 +271,10 @@ impl<D: TransactionData> SVMMessage for ResolvedTransactionView<D> {
     }
 }
 
-impl<D: TransactionData> SVMTransaction for ResolvedTransactionView<D> {
+impl<D: TransactionData, A> SVMTransaction for ResolvedTransactionView<D, A>
+where
+    for<'a> LoadedAddressesView<'a>: From<&'a A>,
+{
     fn signature(&self) -> &Signature {
         &self.view.signatures()[0]
     }
@@ -253,7 +284,7 @@ impl<D: TransactionData> SVMTransaction for ResolvedTransactionView<D> {
     }
 }
 
-impl<D: TransactionData> Debug for ResolvedTransactionView<D> {
+impl<D: TransactionData, A> Debug for ResolvedTransactionView<D, A> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResolvedTransactionView")
             .field("view", &self.view)
