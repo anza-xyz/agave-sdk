@@ -7,7 +7,7 @@ src_root="$(readlink -f "${here}/..")"
 cd "${src_root}"
 
 if [[ -n ${BASE_SHA:-} && -n ${PACKAGE:-} ]]; then
-  echo "Only one of BASE_SHA or PACKAGE should be provided"
+  echo "Only one of BASE_SHA or PACKAGE should be provided" >&2
   exit 1
 fi
 
