@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -eo pipefail
+set -euo pipefail
 
 here="$(dirname "$0")"
 src_root="$(readlink -f "${here}/..")"
