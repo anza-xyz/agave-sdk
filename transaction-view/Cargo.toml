@@ -2,7 +2,7 @@
 name = "agave-transaction-view"
 description = "Agave TranactionView"
 documentation = "https://docs.rs/agave-transaction-view"
-version = "4.3.0"
+version = "5.0.0"
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
