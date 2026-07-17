@@ -60,6 +60,16 @@ jobs:
         env:
           TAG: ${{ steps.meta.outputs.tag }}
 
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6  # v2.82.6
+        with:
+          tool: toml-cli,cargo-semver-checks
+
+      - name: Check semver
+        run: ./scripts/check-semver.sh
+        env:
+          PACKAGE: ${{ inputs.crate }}
+
       - name: Cargo publish dry run
         run: |
           cargo publish -p "${CRATE_NAME}" --dry-run
