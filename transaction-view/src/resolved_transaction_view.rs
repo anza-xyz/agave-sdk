@@ -23,7 +23,7 @@ use {
         svm_message::{SVMMessage, SVMStaticMessage},
         svm_transaction::SVMTransaction,
     },
-    std::collections::HashSet,
+    std::{collections::HashSet, hash::BuildHasher},
 };
 
 /// A parsed and sanitized transaction view that has had all address lookups
@@ -53,10 +53,10 @@ impl<D: TransactionData, A> Deref for ResolvedTransactionView<D, A> {
 impl<D: TransactionData> ResolvedTransactionView<D> {
     /// Given a parsed and sanitized transaction view, and a set of resolved
     /// addresses, create a resolved transaction view.
-    pub fn try_new(
+    pub fn try_new<S: BuildHasher>(
         view: TransactionView<true, D>,
         resolved_addresses: Option<LoadedAddresses>,
-        reserved_account_keys: &HashSet<Pubkey>,
+        reserved_account_keys: &HashSet<Pubkey, S>,
     ) -> Result<Self> {
         Self::try_new_with_source(view, resolved_addresses, reserved_account_keys)
     }
@@ -68,10 +68,10 @@ where
 {
     /// Given a parsed and sanitized transaction view, and a generic source of
     /// resolved addresses, create a resolved transaction view.
-    pub fn try_new_with_source(
+    pub fn try_new_with_source<S: BuildHasher>(
         view: TransactionView<true, D>,
         resolved_addresses: Option<A>,
-        reserved_account_keys: &HashSet<Pubkey>,
+        reserved_account_keys: &HashSet<Pubkey, S>,
     ) -> Result<Self> {
         let resolved_addresses_view = resolved_addresses.as_ref().map(LoadedAddressesView::from);
 
@@ -110,10 +110,10 @@ where
     /// and cache the result.
     /// This is done so we avoid recomputing the expensive checks each time we call
     /// `is_writable` - since there is more to it than just checking index.
-    fn cache_is_writable(
+    fn cache_is_writable<S: BuildHasher>(
         view: &TransactionView<true, D>,
         resolved_addresses: Option<LoadedAddressesView<'_>>,
-        reserved_account_keys: &HashSet<Pubkey>,
+        reserved_account_keys: &HashSet<Pubkey, S>,
     ) -> [bool; 256] {
         // Build account keys so that we can iterate over and check if
         // an address is writable.
@@ -342,7 +342,7 @@ mod tests {
         let bytes = wincode::serialize(&transaction).unwrap();
         let view =
             SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
-        let result = ResolvedTransactionView::try_new(view, None, &HashSet::default());
+        let result = ResolvedTransactionView::try_new(view, None, &HashSet::<Pubkey>::default());
         assert!(matches!(
             result,
             Err(TransactionViewError::AddressLookupMismatch)
@@ -375,7 +375,7 @@ mod tests {
         let view =
             SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
         let result =
-            ResolvedTransactionView::try_new(view, Some(loaded_addresses), &HashSet::default());
+            ResolvedTransactionView::try_new(view, Some(loaded_addresses), &HashSet::<Pubkey>::default());
         assert!(matches!(
             result,
             Err(TransactionViewError::AddressLookupMismatch)
@@ -413,7 +413,7 @@ mod tests {
         let view =
             SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
         let result =
-            ResolvedTransactionView::try_new(view, Some(loaded_addresses), &HashSet::default());
+            ResolvedTransactionView::try_new(view, Some(loaded_addresses), &HashSet::<Pubkey>::default());
         assert!(matches!(
             result,
             Err(TransactionViewError::AddressLookupMismatch)
@@ -422,7 +422,8 @@ mod tests {
 
     #[test]
     fn test_is_writable() {
-        let reserved_account_keys = HashSet::from_iter([sysvar::clock::id(), system_program::id()]);
+        let reserved_account_keys: HashSet<Pubkey> =
+            HashSet::from_iter([sysvar::clock::id(), system_program::id()]);
         // Create a versioned transaction.
         let create_transaction_with_keys =
             |static_keys: Vec<Pubkey>, loaded_addresses: &LoadedAddresses| VersionedTransaction {
@@ -528,7 +529,7 @@ mod tests {
 
     #[test]
     fn test_demote_writable_program() {
-        let reserved_account_keys = HashSet::default();
+        let reserved_account_keys: HashSet<Pubkey> = HashSet::default();
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
         let key2 = Pubkey::new_unique();
@@ -630,5 +631,60 @@ mod tests {
                 assert_eq!(resolved_view.is_writable(index), expected);
             }
         }
+    }
+
+    /// A trivial non-cryptographic hasher, standing in for something like
+    /// `FxHash`, to prove `reserved_account_keys` is accepted for any
+    /// `S: BuildHasher`, not just the default `RandomState`.
+    #[derive(Default)]
+    struct TrivialHasher(u64);
+
+    impl std::hash::Hasher for TrivialHasher {
+        fn finish(&self) -> u64 {
+            self.0
+        }
+
+        fn write(&mut self, bytes: &[u8]) {
+            for &byte in bytes {
+                self.0 = self.0.wrapping_mul(31).wrapping_add(u64::from(byte));
+            }
+        }
+    }
+
+    #[test]
+    fn test_try_new_accepts_custom_hasher() {
+        // Reserved keys stored in a `HashSet` using a custom `BuildHasher`
+        // instead of the default `RandomState`.
+        let reserved_account_keys: HashSet<Pubkey, std::hash::BuildHasherDefault<TrivialHasher>> =
+            HashSet::from_iter([sysvar::clock::id(), system_program::id()]);
+
+        let static_keys = vec![sysvar::clock::id(), Pubkey::new_unique()];
+        let transaction = VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::V0(v0::Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 1,
+                },
+                account_keys: static_keys,
+                recent_blockhash: Hash::default(),
+                instructions: vec![],
+                address_table_lookups: vec![],
+            }),
+        };
+        let bytes = wincode::serialize(&transaction).unwrap();
+        let view =
+            SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
+
+        let resolved_view = ResolvedTransactionView::try_new(
+            view,
+            Some(LoadedAddresses::default()),
+            &reserved_account_keys,
+        )
+        .unwrap();
+
+        // Reserved key is demoted to readonly.
+        assert!(!resolved_view.is_writable(0));
     }
 }
