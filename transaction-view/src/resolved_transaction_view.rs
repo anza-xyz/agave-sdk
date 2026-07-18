@@ -374,8 +374,11 @@ mod tests {
         let bytes = wincode::serialize(&transaction).unwrap();
         let view =
             SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
-        let result =
-            ResolvedTransactionView::try_new(view, Some(loaded_addresses), &HashSet::<Pubkey>::default());
+        let result = ResolvedTransactionView::try_new(
+            view,
+            Some(loaded_addresses),
+            &HashSet::<Pubkey>::default(),
+        );
         assert!(matches!(
             result,
             Err(TransactionViewError::AddressLookupMismatch)
@@ -412,8 +415,11 @@ mod tests {
         let bytes = wincode::serialize(&transaction).unwrap();
         let view =
             SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
-        let result =
-            ResolvedTransactionView::try_new(view, Some(loaded_addresses), &HashSet::<Pubkey>::default());
+        let result = ResolvedTransactionView::try_new(
+            view,
+            Some(loaded_addresses),
+            &HashSet::<Pubkey>::default(),
+        );
         assert!(matches!(
             result,
             Err(TransactionViewError::AddressLookupMismatch)
