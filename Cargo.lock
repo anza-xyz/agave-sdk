@@ -7,6 +7,7 @@ name = "agave-transaction-view"
 version = "5.0.0"
 dependencies = [
  "agave-transaction-view",
+ "bytes",
  "criterion",
  "solana-hash",
  "solana-instruction",
