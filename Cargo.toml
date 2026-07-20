@@ -24,6 +24,7 @@ used_underscore_binding = "deny"
 new_without_default = "allow"
 
 [workspace.dependencies]
+bytes = "1.12.1"
 criterion = "0.8.2"
 solana-hash = "4.5.0"
 solana-instruction = "3.4.0"
