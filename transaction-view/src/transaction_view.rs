@@ -42,6 +42,21 @@ impl<D: TransactionData> TransactionView<false, D> {
         Ok(Self { data, frame })
     }
 
+    /// Creates a new `TransactionView` without running sanitization checks,
+    /// parsing a single transaction from the front of `data`.
+    ///
+    /// Unlike [`Self::try_new_unsanitized`], `data` may contain trailing
+    /// bytes after the serialized transaction. Returns the view and the
+    /// number of bytes the transaction occupies, i.e. the offset at which
+    /// the next item in the buffer begins. The view only exposes the
+    /// serialized transaction: trailing bytes are not part of
+    /// [`Self::data`].
+    pub fn try_new_unsanitized_from_prefix(data: D) -> Result<(Self, usize)> {
+        let frame = TransactionFrame::try_new_from_prefix(data.data())?;
+        let consumed_len = usize::from(frame.data_len());
+        Ok((Self { data, frame }, consumed_len))
+    }
+
     /// Sanitizes the transaction view, returning a sanitized view on success.
     pub fn sanitize(self, config: &SanitizeConfig) -> Result<SanitizedTransactionView<D>> {
         sanitize(&self, config)?;
@@ -57,6 +72,21 @@ impl<D: TransactionData> TransactionView<true, D> {
     pub fn try_new_sanitized(data: D, config: &SanitizeConfig) -> Result<Self> {
         let unsanitized_view = TransactionView::try_new_unsanitized(data)?;
         unsanitized_view.sanitize(config)
+    }
+
+    /// Creates a new `TransactionView`, running sanitization checks,
+    /// parsing a single transaction from the front of `data`.
+    ///
+    /// Unlike [`Self::try_new_sanitized`], `data` may contain trailing bytes
+    /// after the serialized transaction. See
+    /// [`TransactionView::try_new_unsanitized_from_prefix`].
+    pub fn try_new_sanitized_from_prefix(
+        data: D,
+        config: &SanitizeConfig,
+    ) -> Result<(Self, usize)> {
+        let (unsanitized_view, consumed_len) =
+            TransactionView::try_new_unsanitized_from_prefix(data)?;
+        Ok((unsanitized_view.sanitize(config)?, consumed_len))
     }
 }
 
@@ -174,9 +204,14 @@ impl<const SANITIZED: bool, D: TransactionData> TransactionView<SANITIZED, D> {
     }
 
     /// Return the full serialized transaction data.
+    /// If the view was created with trailing bytes allowed, the returned
+    /// slice ends where the serialized transaction ends and does not include
+    /// the trailing bytes; the underlying buffer remains available through
+    /// [`Self::inner_data`].
     #[inline]
     pub fn data(&self) -> &[u8] {
-        self.data.data()
+        let data_length: usize = self.frame.data_len().into();
+        &self.data.data()[..data_length]
     }
 
     /// Return the serialized **message** data.
@@ -513,5 +548,127 @@ mod tests {
         assert_eq!(instructions[0].program_id_index, 1);
         assert_eq!(instructions[0].accounts, &[0]);
         assert_eq!(instructions[0].data, &[1, 2, 3, 4]);
+    }
+
+    // Current protocol values; production callers supply these from agave.
+    fn test_sanitize_config() -> SanitizeConfig {
+        SanitizeConfig {
+            min_requested_heap_size: 32 * 1024,
+            max_requested_heap_size: 256 * 1024,
+            max_instructions: 64,
+            max_accounts_per_instruction: 255,
+        }
+    }
+
+    fn append_trailing_bytes(transaction_bytes: &[u8]) -> Vec<u8> {
+        let mut bytes_with_trailing = transaction_bytes.to_vec();
+        bytes_with_trailing.extend_from_slice(&[0xAA; 7]);
+        bytes_with_trailing
+    }
+
+    #[test]
+    fn test_try_new_unsanitized_rejects_trailing_bytes() {
+        // given a serialized transaction followed by trailing bytes
+        let bytes_with_trailing =
+            append_trailing_bytes(&wincode::serialize(&multiple_transfers()).unwrap());
+
+        // when parsing with the strict constructor
+        let result = TransactionView::try_new_unsanitized(bytes_with_trailing.as_slice());
+
+        // then parsing fails
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_prefix_ignores_trailing_bytes_legacy() {
+        // given a serialized legacy transaction followed by trailing bytes
+        let transaction_bytes = wincode::serialize(&multiple_transfers()).unwrap();
+        let bytes_with_trailing = append_trailing_bytes(&transaction_bytes);
+
+        // when parsing from the prefix of the buffer
+        let (view, consumed_len) =
+            TransactionView::try_new_unsanitized_from_prefix(bytes_with_trailing.as_slice())
+                .unwrap();
+
+        // then the view exposes exactly the transaction, without the trailing bytes
+        assert_eq!(consumed_len, transaction_bytes.len());
+        assert_eq!(view.data(), transaction_bytes.as_slice());
+        assert!(matches!(view.version(), TransactionVersion::Legacy));
+        assert_eq!(view.num_instructions(), 2);
+    }
+
+    #[test]
+    fn test_from_prefix_ignores_trailing_bytes_v1() {
+        // given a serialized v1 transaction followed by trailing bytes
+        let transaction_bytes = wincode::serialize(&simple_v1_transaction()).unwrap();
+        let bytes_with_trailing = append_trailing_bytes(&transaction_bytes);
+
+        // when parsing from the prefix of the buffer
+        let (view, consumed_len) =
+            TransactionView::try_new_unsanitized_from_prefix(bytes_with_trailing.as_slice())
+                .unwrap();
+
+        // then the view exposes exactly the transaction, without the trailing bytes
+        assert_eq!(consumed_len, transaction_bytes.len());
+        assert_eq!(view.data(), transaction_bytes.as_slice());
+        assert!(matches!(view.version(), TransactionVersion::V1));
+        assert_eq!(view.signatures().len(), 1);
+    }
+
+    #[test]
+    fn test_from_prefix_still_rejects_truncated_transaction() {
+        // given a serialized transaction with its last byte removed
+        let transaction_bytes = wincode::serialize(&multiple_transfers()).unwrap();
+        let truncated_bytes = &transaction_bytes[..transaction_bytes.len() - 1];
+
+        // when parsing from the prefix of the buffer
+        let result = TransactionView::try_new_unsanitized_from_prefix(truncated_bytes);
+
+        // then parsing fails
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sanitized_from_prefix() {
+        // given a serialized transaction followed by trailing bytes
+        let transaction_bytes = wincode::serialize(&multiple_transfers()).unwrap();
+        let bytes_with_trailing = append_trailing_bytes(&transaction_bytes);
+
+        // when parsing from the prefix of the buffer and sanitizing
+        let (view, consumed_len) = TransactionView::try_new_sanitized_from_prefix(
+            bytes_with_trailing.as_slice(),
+            &test_sanitize_config(),
+        )
+        .unwrap();
+
+        // then sanitization passes and the view excludes the trailing bytes
+        assert_eq!(consumed_len, transaction_bytes.len());
+        assert_eq!(view.data(), transaction_bytes.as_slice());
+    }
+
+    #[test]
+    fn test_from_prefix_splits_concatenated_transactions_from_bytes_buffer() {
+        // given a `Bytes` buffer holding two serialized transactions back-to-back
+        let first_transaction_bytes = wincode::serialize(&multiple_transfers()).unwrap();
+        let second_transaction_bytes = wincode::serialize(&simple_v1_transaction()).unwrap();
+        let buffer = bytes::Bytes::from(
+            [
+                first_transaction_bytes.as_slice(),
+                second_transaction_bytes.as_slice(),
+            ]
+            .concat(),
+        );
+
+        // when parsing the first transaction and continuing from where it ends
+        let (first_view, first_consumed_len) =
+            TransactionView::try_new_unsanitized_from_prefix(buffer.clone()).unwrap();
+        let remaining_buffer = buffer.slice(first_consumed_len..);
+        let second_view = TransactionView::try_new_unsanitized(remaining_buffer).unwrap();
+
+        // then each view exposes exactly its own transaction
+        assert_eq!(first_view.data(), first_transaction_bytes.as_slice());
+        assert!(matches!(first_view.version(), TransactionVersion::Legacy));
+        assert_eq!(second_view.data(), second_transaction_bytes.as_slice());
+        assert!(matches!(second_view.version(), TransactionVersion::V1));
     }
 }

@@ -42,6 +42,18 @@ impl TransactionFrame {
     /// Parse a serialized transaction and verify basic structure.
     /// The `bytes` parameter must have no trailing data.
     pub(crate) fn try_new(bytes: &[u8]) -> Result<Self> {
+        let transaction_frame = Self::try_new_from_prefix(bytes)?;
+        // Verify that the entire buffer was parsed.
+        if usize::from(transaction_frame.data_len) != bytes.len() {
+            return Err(TransactionViewError::ParseError);
+        }
+        Ok(transaction_frame)
+    }
+
+    /// Parse a serialized transaction from the front of `bytes` and verify
+    /// basic structure. Any bytes after the serialized transaction are
+    /// ignored; [`Self::data_len`] returns where the transaction ends.
+    pub(crate) fn try_new_from_prefix(bytes: &[u8]) -> Result<Self> {
         if Self::is_legacy_or_v0(bytes)? {
             Self::try_new_as_legacy_or_v0(bytes)
         } else {
@@ -77,11 +89,6 @@ impl TransactionFrame {
             TransactionVersion::V0 => AddressTableLookupFrame::try_new(bytes, &mut offset)?,
             TransactionVersion::V1 => unreachable!("unexpected variant"),
         };
-
-        // Verify that the entire transaction was parsed.
-        if offset != bytes.len() {
-            return Err(TransactionViewError::ParseError);
-        }
 
         Ok(Self {
             signature,
@@ -154,11 +161,6 @@ impl TransactionFrame {
             &mut offset,
             u16::from(num_required_signatures),
         )?;
-        // Verify that the entire transaction was parsed.
-        if offset != bytes.len() {
-            return Err(TransactionViewError::ParseError);
-        }
-
         let frame = Self {
             signature: SignatureFrame {
                 num_signatures: num_required_signatures,
@@ -276,6 +278,14 @@ impl TransactionFrame {
     #[inline]
     pub(crate) fn transaction_config_frame(&self) -> &TransactionConfigFrame {
         &self.transaction_config_frame
+    }
+
+    /// Return the length of the serialized transaction. This may be less
+    /// than the length of the buffer the frame was parsed from if trailing
+    /// bytes were allowed.
+    #[inline]
+    pub(crate) fn data_len(&self) -> u16 {
+        self.data_len
     }
 }
 
