@@ -72,8 +72,7 @@ jobs:
         run: ./scripts/check-crates.sh
 
   semver:
-    name: Check semver on version bump
-    if: ${{ github.event_name == 'pull_request' }}
+    name: Check semver
     permissions:
       contents: read
     runs-on: ubuntu-latest
@@ -88,10 +87,15 @@ jobs:
         with:
           tool: toml-cli,cargo-semver-checks
 
-      - name: Check semver
+      - name: Check semver (pull request)
+        if: ${{ github.event_name == 'pull_request' }}
         run: ./scripts/check-semver.sh
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+
+      - name: Check semver (push)
+        if: ${{ github.event_name == 'push' }}
+        run: cargo semver-checks --workspace
 
   format:
     name: Format
