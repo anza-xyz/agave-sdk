@@ -23,7 +23,7 @@ use {
         svm_message::{SVMMessage, SVMStaticMessage},
         svm_transaction::SVMTransaction,
     },
-    std::collections::HashSet,
+    std::{collections::HashSet, hash::BuildHasher},
 };
 
 /// A parsed and sanitized transaction view that has had all address lookups
@@ -53,10 +53,10 @@ impl<D: TransactionData, A> Deref for ResolvedTransactionView<D, A> {
 impl<D: TransactionData> ResolvedTransactionView<D> {
     /// Given a parsed and sanitized transaction view, and a set of resolved
     /// addresses, create a resolved transaction view.
-    pub fn try_new(
+    pub fn try_new<S: BuildHasher>(
         view: TransactionView<true, D>,
         resolved_addresses: Option<LoadedAddresses>,
-        reserved_account_keys: &HashSet<Pubkey>,
+        reserved_account_keys: &HashSet<Pubkey, S>,
     ) -> Result<Self> {
         Self::try_new_with_source(view, resolved_addresses, reserved_account_keys)
     }
@@ -68,10 +68,10 @@ where
 {
     /// Given a parsed and sanitized transaction view, and a generic source of
     /// resolved addresses, create a resolved transaction view.
-    pub fn try_new_with_source(
+    pub fn try_new_with_source<S: BuildHasher>(
         view: TransactionView<true, D>,
         resolved_addresses: Option<A>,
-        reserved_account_keys: &HashSet<Pubkey>,
+        reserved_account_keys: &HashSet<Pubkey, S>,
     ) -> Result<Self> {
         let resolved_addresses_view = resolved_addresses.as_ref().map(LoadedAddressesView::from);
 
@@ -110,10 +110,10 @@ where
     /// and cache the result.
     /// This is done so we avoid recomputing the expensive checks each time we call
     /// `is_writable` - since there is more to it than just checking index.
-    fn cache_is_writable(
+    fn cache_is_writable<S: BuildHasher>(
         view: &TransactionView<true, D>,
         resolved_addresses: Option<LoadedAddressesView<'_>>,
-        reserved_account_keys: &HashSet<Pubkey>,
+        reserved_account_keys: &HashSet<Pubkey, S>,
     ) -> [bool; 256] {
         // Build account keys so that we can iterate over and check if
         // an address is writable.
@@ -302,6 +302,7 @@ mod tests {
             compiled_instruction::CompiledInstruction,
             v0::{self, MessageAddressTableLookup},
         },
+        solana_pubkey::PubkeyHasherBuilder,
         solana_sdk_ids::{system_program, sysvar},
         solana_signature::Signature,
         solana_transaction::versioned::VersionedTransaction,
@@ -342,7 +343,11 @@ mod tests {
         let bytes = wincode::serialize(&transaction).unwrap();
         let view =
             SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
-        let result = ResolvedTransactionView::try_new(view, None, &HashSet::default());
+        let result = ResolvedTransactionView::try_new(
+            view,
+            None,
+            &HashSet::with_hasher(PubkeyHasherBuilder::default()),
+        );
         assert!(matches!(
             result,
             Err(TransactionViewError::AddressLookupMismatch)
@@ -374,8 +379,11 @@ mod tests {
         let bytes = wincode::serialize(&transaction).unwrap();
         let view =
             SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
-        let result =
-            ResolvedTransactionView::try_new(view, Some(loaded_addresses), &HashSet::default());
+        let result = ResolvedTransactionView::try_new(
+            view,
+            Some(loaded_addresses),
+            &HashSet::with_hasher(PubkeyHasherBuilder::default()),
+        );
         assert!(matches!(
             result,
             Err(TransactionViewError::AddressLookupMismatch)
@@ -412,8 +420,11 @@ mod tests {
         let bytes = wincode::serialize(&transaction).unwrap();
         let view =
             SanitizedTransactionView::try_new_sanitized(bytes.as_ref(), &test_config()).unwrap();
-        let result =
-            ResolvedTransactionView::try_new(view, Some(loaded_addresses), &HashSet::default());
+        let result = ResolvedTransactionView::try_new(
+            view,
+            Some(loaded_addresses),
+            &HashSet::with_hasher(PubkeyHasherBuilder::default()),
+        );
         assert!(matches!(
             result,
             Err(TransactionViewError::AddressLookupMismatch)
@@ -422,7 +433,9 @@ mod tests {
 
     #[test]
     fn test_is_writable() {
-        let reserved_account_keys = HashSet::from_iter([sysvar::clock::id(), system_program::id()]);
+        let mut reserved_account_keys: HashSet<Pubkey, PubkeyHasherBuilder> =
+            HashSet::with_hasher(PubkeyHasherBuilder::default());
+        reserved_account_keys.extend([sysvar::clock::id(), system_program::id()]);
         // Create a versioned transaction.
         let create_transaction_with_keys =
             |static_keys: Vec<Pubkey>, loaded_addresses: &LoadedAddresses| VersionedTransaction {
@@ -528,7 +541,8 @@ mod tests {
 
     #[test]
     fn test_demote_writable_program() {
-        let reserved_account_keys = HashSet::default();
+        let reserved_account_keys: HashSet<Pubkey, PubkeyHasherBuilder> =
+            HashSet::with_hasher(PubkeyHasherBuilder::default());
         let key0 = Pubkey::new_unique();
         let key1 = Pubkey::new_unique();
         let key2 = Pubkey::new_unique();
