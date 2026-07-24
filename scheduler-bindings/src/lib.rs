@@ -1,4 +1,5 @@
 #![no_std]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Messages passed between agave and an external pack process.
 //! Messages are passed via `shaq::spsc::Consumer/Producer`.
