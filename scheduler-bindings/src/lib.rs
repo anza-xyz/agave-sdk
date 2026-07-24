@@ -232,7 +232,7 @@ pub struct PackToWorkerMessage {
     /// Maximum working bank slot that this message will be processed
     /// for. For execution, this will check the leader bank if it exists.
     /// If the working bank is ahead of the slot, the return message will
-    /// be set with [`NOT_PROCESSED`].
+    /// be set with [`processed_codes::MAX_WORKING_SLOT_EXCEEDED`].
     pub max_working_slot: u64,
     /// Offset and number of transactions in the batch.
     /// See [`SharableTransactionBatchRegion`] for details.
@@ -322,7 +322,7 @@ pub mod worker_message_types {
 
     /// Response to pack for a transaction that attempted execution.
     /// This response will only be sent if the original message flags
-    /// requested execution i.e. not [`super::pack_message_flags::RESOLVE`].
+    /// requested execution i.e. not [`super::pack_message_flags::CHECK`].
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     #[repr(C)]
     pub struct ExecutionResponse {
