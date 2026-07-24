@@ -1,5 +1,8 @@
 [workspace]
-members = ["transaction-view"]
+members = [
+    "scheduler-bindings",
+    "transaction-view"
+]
 
 resolver = "2"
 
