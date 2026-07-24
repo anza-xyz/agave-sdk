@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "agave-scheduler-bindings"
+version = "5.0.0"
+
+[[package]]
 name = "agave-transaction-view"
 version = "5.1.0"
 dependencies = [
