@@ -87,15 +87,10 @@ jobs:
         with:
           tool: toml-cli,cargo-semver-checks
 
-      - name: Check semver (pull request)
-        if: ${{ github.event_name == 'pull_request' }}
+      - name: Check semver
         run: ./scripts/check-semver.sh
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-
-      - name: Check semver (push)
-        if: ${{ github.event_name == 'push' }}
-        run: cargo semver-checks --workspace
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
 
   format:
     name: Format
