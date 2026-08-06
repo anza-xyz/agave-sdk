@@ -1,5 +1,5 @@
 /// A byte that represents the version of the transaction.
-#[derive(Copy, Clone, Debug, Default)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 #[repr(u8)]
 pub enum TransactionVersion {
     #[default]
