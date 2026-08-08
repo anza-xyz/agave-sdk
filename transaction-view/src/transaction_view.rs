@@ -15,7 +15,7 @@ use {
     solana_signature::Signature,
     solana_svm_transaction::{
         instruction::SVMInstruction, message_address_table_lookup::SVMMessageAddressTableLookup,
-        svm_message::SVMStaticMessage,
+        svm_message::SVMStaticMessage, svm_transaction::SVMStaticTransaction,
     },
 };
 
@@ -317,6 +317,14 @@ impl<D: TransactionData> SVMStaticMessage for TransactionView<true, D> {
         self.num_requested_write_locks()
     }
 
+    fn num_readonly_signed_static_accounts(&self) -> u8 {
+        self.num_readonly_signed_static_accounts()
+    }
+
+    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
+        self.num_readonly_unsigned_static_accounts()
+    }
+
     fn recent_blockhash(&self) -> &Hash {
         self.recent_blockhash()
     }
@@ -352,6 +360,28 @@ impl<D: TransactionData> SVMStaticMessage for TransactionView<true, D> {
     ) -> impl Iterator<Item = SVMMessageAddressTableLookup<'_>> {
         self.address_table_lookup_iter()
     }
+
+    fn is_signer(&self, index: usize) -> bool {
+        index < usize::from(self.num_required_signatures())
+    }
+
+    fn is_invoked(&self, key_index: usize) -> bool {
+        let Ok(index) = u8::try_from(key_index) else {
+            return false;
+        };
+        self.instructions_iter()
+            .any(|ix| ix.program_id_index == index)
+    }
+}
+
+impl<D: TransactionData> SVMStaticTransaction for TransactionView<true, D> {
+    fn signature(&self) -> &Signature {
+        &self.signatures()[0]
+    }
+
+    fn signatures(&self) -> &[Signature] {
+        self.signatures()
+    }
 }
 
 impl<D: TransactionData> SVMStaticMessage for &TransactionView<true, D> {
@@ -365,6 +395,14 @@ impl<D: TransactionData> SVMStaticMessage for &TransactionView<true, D> {
 
     fn num_write_locks(&self) -> u64 {
         <TransactionView<true, D> as SVMStaticMessage>::num_write_locks(self)
+    }
+
+    fn num_readonly_signed_static_accounts(&self) -> u8 {
+        <TransactionView<true, D> as SVMStaticMessage>::num_readonly_signed_static_accounts(self)
+    }
+
+    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
+        <TransactionView<true, D> as SVMStaticMessage>::num_readonly_unsigned_static_accounts(self)
     }
 
     fn recent_blockhash(&self) -> &Hash {
@@ -401,6 +439,24 @@ impl<D: TransactionData> SVMStaticMessage for &TransactionView<true, D> {
         &self,
     ) -> impl Iterator<Item = SVMMessageAddressTableLookup<'_>> {
         <TransactionView<true, D> as SVMStaticMessage>::message_address_table_lookups(self)
+    }
+
+    fn is_signer(&self, index: usize) -> bool {
+        <TransactionView<true, D> as SVMStaticMessage>::is_signer(self, index)
+    }
+
+    fn is_invoked(&self, key_index: usize) -> bool {
+        <TransactionView<true, D> as SVMStaticMessage>::is_invoked(self, key_index)
+    }
+}
+
+impl<D: TransactionData> SVMStaticTransaction for &TransactionView<true, D> {
+    fn signature(&self) -> &Signature {
+        <TransactionView<true, D> as SVMStaticTransaction>::signature(self)
+    }
+
+    fn signatures(&self) -> &[Signature] {
+        <TransactionView<true, D> as SVMStaticTransaction>::signatures(self)
     }
 }
 
