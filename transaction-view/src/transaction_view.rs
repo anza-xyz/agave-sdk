@@ -317,11 +317,11 @@ impl<D: TransactionData> SVMStaticMessage for TransactionView<true, D> {
         self.num_requested_write_locks()
     }
 
-    fn num_readonly_signed_accounts(&self) -> u8 {
+    fn num_readonly_signed_static_accounts(&self) -> u8 {
         self.num_readonly_signed_static_accounts()
     }
 
-    fn num_readonly_unsigned_accounts(&self) -> u8 {
+    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
         self.num_readonly_unsigned_static_accounts()
     }
 
@@ -397,12 +397,12 @@ impl<D: TransactionData> SVMStaticMessage for &TransactionView<true, D> {
         <TransactionView<true, D> as SVMStaticMessage>::num_write_locks(self)
     }
 
-    fn num_readonly_signed_accounts(&self) -> u8 {
-        <TransactionView<true, D> as SVMStaticMessage>::num_readonly_signed_accounts(self)
+    fn num_readonly_signed_static_accounts(&self) -> u8 {
+        <TransactionView<true, D> as SVMStaticMessage>::num_readonly_signed_static_accounts(self)
     }
 
-    fn num_readonly_unsigned_accounts(&self) -> u8 {
-        <TransactionView<true, D> as SVMStaticMessage>::num_readonly_unsigned_accounts(self)
+    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
+        <TransactionView<true, D> as SVMStaticMessage>::num_readonly_unsigned_static_accounts(self)
     }
 
     fn recent_blockhash(&self) -> &Hash {

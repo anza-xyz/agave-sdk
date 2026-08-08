@@ -200,11 +200,11 @@ impl<D: TransactionData, A> SVMStaticMessage for ResolvedTransactionView<D, A> {
         self.view.num_requested_write_locks()
     }
 
-    fn num_readonly_signed_accounts(&self) -> u8 {
+    fn num_readonly_signed_static_accounts(&self) -> u8 {
         self.view.num_readonly_signed_static_accounts()
     }
 
-    fn num_readonly_unsigned_accounts(&self) -> u8 {
+    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
         self.view.num_readonly_unsigned_static_accounts()
     }
 
