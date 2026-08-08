@@ -21,7 +21,7 @@ use {
         instruction::SVMInstruction,
         message_address_table_lookup::SVMMessageAddressTableLookup,
         svm_message::{SVMMessage, SVMStaticMessage},
-        svm_transaction::SVMTransaction,
+        svm_transaction::SVMStaticTransaction,
     },
     std::{collections::HashSet, hash::BuildHasher},
 };
@@ -200,6 +200,14 @@ impl<D: TransactionData, A> SVMStaticMessage for ResolvedTransactionView<D, A> {
         self.view.num_requested_write_locks()
     }
 
+    fn num_readonly_signed_static_accounts(&self) -> u8 {
+        self.view.num_readonly_signed_static_accounts()
+    }
+
+    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
+        self.view.num_readonly_unsigned_static_accounts()
+    }
+
     fn recent_blockhash(&self) -> &Hash {
         self.view.recent_blockhash()
     }
@@ -240,6 +248,19 @@ impl<D: TransactionData, A> SVMStaticMessage for ResolvedTransactionView<D, A> {
     ) -> impl Iterator<Item = SVMMessageAddressTableLookup<'_>> {
         self.view.address_table_lookup_iter()
     }
+
+    fn is_signer(&self, index: usize) -> bool {
+        index < usize::from(self.view.num_required_signatures())
+    }
+
+    fn is_invoked(&self, key_index: usize) -> bool {
+        let Ok(index) = u8::try_from(key_index) else {
+            return false;
+        };
+        self.view
+            .instructions_iter()
+            .any(|ix| ix.program_id_index == index)
+    }
 }
 
 impl<D: TransactionData, A> SVMMessage for ResolvedTransactionView<D, A>
@@ -256,25 +277,9 @@ where
     fn is_writable(&self, index: usize) -> bool {
         self.writable_cache.get(index).copied().unwrap_or(false)
     }
-
-    fn is_signer(&self, index: usize) -> bool {
-        index < usize::from(self.view.num_required_signatures())
-    }
-
-    fn is_invoked(&self, key_index: usize) -> bool {
-        let Ok(index) = u8::try_from(key_index) else {
-            return false;
-        };
-        self.view
-            .instructions_iter()
-            .any(|ix| ix.program_id_index == index)
-    }
 }
 
-impl<D: TransactionData, A> SVMTransaction for ResolvedTransactionView<D, A>
-where
-    for<'a> LoadedAddressesView<'a>: From<&'a A>,
-{
+impl<D: TransactionData, A> SVMStaticTransaction for ResolvedTransactionView<D, A> {
     fn signature(&self) -> &Signature {
         &self.view.signatures()[0]
     }

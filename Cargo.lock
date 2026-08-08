@@ -1291,9 +1291,9 @@ dependencies = [
 
 [[package]]
 name = "solana-svm-transaction"
-version = "4.3.0"
+version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "260eeb3e9542372a1b52710cd48e3b45802a2c4533205eaa286029e52f3785c3"
+checksum = "0afde938e0d3f06e87853e6e189396d67256e3b600675d867a47d066f8cebadb"
 dependencies = [
  "solana-hash",
  "solana-message",
