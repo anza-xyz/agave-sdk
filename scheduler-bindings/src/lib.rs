@@ -219,6 +219,10 @@ pub struct ProgressMessage {
     /// i.e. block_limit - current_cost_units_used.
     /// Only valid if currently leader, otherwise the value is undefined.
     pub remaining_cost_units: u64,
+    /// The remaining account data allocation allowed to be packed in the block, in bytes.
+    /// i.e. allocated_accounts_data_size_limit - current_allocated_accounts_data_size.
+    /// Only valid if currently leader, otherwise the value is undefined.
+    pub remaining_allocated_accounts_data_size: u64,
     /// The latest blockhash of the working bank.
     /// Only valid if `leader_state == LEADER_READY`, otherwise zeroed.
     pub latest_blockhash: [u8; 32],
