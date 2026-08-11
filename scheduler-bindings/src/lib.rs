@@ -291,6 +291,9 @@ pub mod check_message_flags {
 
     /// Transactions should have ATL pubkeys resolved and returned.
     pub const LOAD_ADDRESS_LOOKUP_TABLES: u16 = 1 << 2;
+
+    /// Calculate transaction fee details and estimated costs for scheduling.
+    pub const CALCULATE_SCHEDULING_DETAILS: u16 = 1 << 3;
 }
 
 pub mod execution_message_flags {
@@ -534,6 +537,15 @@ pub mod worker_message_types {
         pub const FAILED: u8 = 1 << 2;
     }
 
+    pub mod scheduling_details_flags {
+        /// Flag set if scheduling details were requested.
+        pub const REQUESTED: u8 = 1 << 0;
+        /// Flag set if scheduling detail calculation was performed.
+        pub const PERFORMED: u8 = 1 << 1;
+        /// Flag set if scheduling detail calculation failed.
+        pub const FAILED: u8 = 1 << 2;
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     #[repr(C)]
     pub struct CheckResponse {
@@ -545,11 +557,31 @@ pub mod worker_message_types {
         pub fee_payer_balance_flags: u8,
         /// See [`resolve_flags`] for details.
         pub resolve_flags: u8,
+        /// See [`scheduling_details_flags`] for details.
+        pub scheduling_details_flags: u8,
 
         /// If [`status_check_flags::ALREADY_PROCESSED`] is set,
         /// this is the slot the transaction was previously included in.
         /// Otherwise the value is undefined.
         pub included_slot: u64,
+
+        /// Set only if [`scheduling_details_flags::PERFORMED`] is set and
+        /// [`scheduling_details_flags::FAILED`] is clear, otherwise the value is undefined.
+        /// The base transaction fee in lamports.
+        pub transaction_fee: u64,
+        /// Set only if [`scheduling_details_flags::PERFORMED`] is set and
+        /// [`scheduling_details_flags::FAILED`] is clear, otherwise the value is undefined.
+        /// The prioritization fee in lamports.
+        pub prioritization_fee: u64,
+        /// Set only if [`scheduling_details_flags::PERFORMED`] is set and
+        /// [`scheduling_details_flags::FAILED`] is clear, otherwise the value is undefined.
+        /// Estimated cost units used for scheduling.
+        pub estimated_cost_units: u64,
+        /// Set only if [`scheduling_details_flags::PERFORMED`] is set and
+        /// [`scheduling_details_flags::FAILED`] is clear, otherwise the value is undefined.
+        /// Estimated account data allocation in bytes. This cost component is tracked separately
+        /// and is not included in [`Self::estimated_cost_units`].
+        pub allocated_accounts_data_size: u64,
 
         /// Set only if [`fee_payer_balance_flags::PERFORMED`] is set,
         /// otherwise the value is undefined.
