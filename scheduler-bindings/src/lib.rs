@@ -206,6 +206,10 @@ pub struct ProgressMessage {
     /// The latest blockhash of the working bank.
     /// Only valid if `leader_state == LEADER_READY`, otherwise zeroed.
     pub latest_blockhash: [u8; 32],
+    /// Target duration, in milliseconds, for filling the current leader bank.
+    ///
+    /// Only valid when `leader_state == LEADER_READY`; otherwise zeroed.
+    pub target_bank_time_ms: u16,
 }
 
 /// Maximum number of transactions allowed in a [`PackToWorkerMessage`].
