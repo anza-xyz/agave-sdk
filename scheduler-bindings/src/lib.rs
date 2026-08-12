@@ -115,7 +115,6 @@ pub struct ExecutionResponseRegion {
     /// The number of transactions in the original message.
     /// This corresponds to the number of responses pointed to by
     /// `transaction_responses_offset`.
-    /// This MUST be the same as `batch.num_transactions`.
     pub num_transaction_responses: u8,
     /// Offset within the shared memory allocator for the array of
     /// [`worker_message_types::ExecutionResponse`] messages.
@@ -136,7 +135,6 @@ pub struct CheckResponseRegion {
     /// The number of transactions in the original message.
     /// This corresponds to the number of responses pointed to by
     /// `transaction_responses_offset`.
-    /// This MUST be the same as `batch.num_transactions`.
     pub num_transaction_responses: u8,
     /// Offset within the shared memory allocator for the array of
     /// [`worker_message_types::CheckResponse`] messages.
@@ -333,7 +331,9 @@ pub struct ExecutionWorkerToPackMessage {
     /// See [`processed_codes`] for accepted values.
     pub processed_code: u8,
     /// Response per transaction in the batch.
-    /// If message was not processed, this field is undefined.
+    /// When `processed_code` is [`processed_codes::PROCESSED`],
+    /// `responses.num_transaction_responses` MUST be the same as
+    /// `batch.num_transactions`. Otherwise, this field is undefined.
     /// See [`ExecutionResponseRegion`] for details.
     pub responses: ExecutionResponseRegion,
 }
@@ -353,7 +353,9 @@ pub struct CheckWorkerToPackMessage {
     /// See [`processed_codes`] for accepted values.
     pub processed_code: u8,
     /// Response per transaction in the batch.
-    /// If message was not processed, this field is undefined.
+    /// When `processed_code` is [`processed_codes::PROCESSED`],
+    /// `responses.num_transaction_responses` MUST be the same as
+    /// `batch.num_transactions`. Otherwise, this field is undefined.
     /// See [`CheckResponseRegion`] for details.
     pub responses: CheckResponseRegion,
 }
