@@ -62,6 +62,13 @@
 //!   responsible for freeing it.
 //!
 
+/// Returns the major version of this crate.
+pub fn version() -> u64 {
+    env!("CARGO_PKG_VERSION_MAJOR")
+        .parse()
+        .expect("crate major version must be a u64")
+}
+
 /// Reference to a transaction that can shared safely across processes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
