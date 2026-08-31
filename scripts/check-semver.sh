@@ -38,6 +38,10 @@ for member in "${members[@]}"; do
   rm -f "${base_manifest}"
 
   echo "${package}: ${base_version:-<new>} -> ${current_version}"
+  if [[ -z "${base_version}" ]]; then
+    continue
+  fi
+
   if [[ "${base_version}" != "${current_version}" ]]; then
     changed_manifests+=("${manifest}")
   fi
