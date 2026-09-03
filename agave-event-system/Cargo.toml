@@ -1,0 +1,29 @@
+[package]
+name = "agave-event-system"
+version = "0.1.0"
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
+all-features = true
+rustdoc-args = ["--cfg=docsrs"]
+
+[dependencies]
+agave-event-system-derive = { path = "../agave-event-system-derive" }
+libc = { workspace = true }
+shaq = { workspace = true }
+thiserror = { workspace = true }
+wincode = { workspace = true }
+wincode-dynamic = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+rstest = { workspace = true }
+
+[lints]
+workspace = true
