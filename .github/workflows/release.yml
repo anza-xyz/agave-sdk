@@ -10,6 +10,7 @@ on:
         options:
           - agave-transaction-view
           - agave-scheduler-bindings
+          - agave-scheduler-handshake
       ref:
         description: "git ref to tag (can be a branch or a commit hash)"
         required: true
