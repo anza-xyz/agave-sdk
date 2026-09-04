@@ -19,8 +19,7 @@ declare -A verified_crate_owners=(
 )
 
 # get Cargo.toml from git diff
-# NOTE: update this to remove the "sdk" portion when moving to a new repo
-readarray -t files <<<"$(git diff "$COMMIT_RANGE" --diff-filter=AM --name-only | grep Cargo.toml | grep "^sdk/" | sed 's#sdk/##')"
+readarray -t files <<<"$(git diff "$COMMIT_RANGE" --diff-filter=AM --name-only | grep Cargo.toml)"
 printf "%s\n" "${files[@]}"
 
 has_error=0
