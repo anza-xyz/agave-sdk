@@ -57,7 +57,7 @@ solana-signer = "3.0.1"
 solana-svm-transaction = "5.0.0"
 solana-system-interface = { version = "3.3", features = ["alloc", "wincode"] }
 solana-transaction = "4.2.0"
-syn = "2.0.118"
+syn = "3.0.4"
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 wincode = { version = "0.6.1", features = ["derive"] }
