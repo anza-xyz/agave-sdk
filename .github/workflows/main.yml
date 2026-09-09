@@ -54,7 +54,7 @@ jobs:
           cargo-cache-fallback-key: cargo-stable
 
       - name: Install toml-cli
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: toml-cli
 
@@ -177,7 +177,7 @@ jobs:
           cargo-cache-key: cargo-audit
 
       - name: Install cargo-audit
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: cargo-audit
 
@@ -201,7 +201,7 @@ jobs:
           cargo-cache-fallback-key: cargo-nightly
 
       - name: Install cargo-hack
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: cargo-hack
 
@@ -229,7 +229,7 @@ jobs:
           cargo-cache-fallback-key: cargo-nightly
 
       - name: Install cargo-hack
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: cargo-hack
 
@@ -279,12 +279,12 @@ jobs:
           cargo-cache-fallback-key: cargo-nightly
 
       - name: Install cargo-hack
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: cargo-hack
 
       - name: Install cargo-minimal-versions
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: cargo-minimal-versions
 
@@ -320,7 +320,7 @@ jobs:
           cargo-cache-fallback-key: cargo-nightly
 
       - name: Install cargo-hack
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: cargo-hack
 
@@ -378,7 +378,7 @@ jobs:
           cargo-cache-fallback-key: cargo-nightly
 
       - name: Install cargo-hack
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: cargo-hack
 
@@ -402,7 +402,7 @@ jobs:
           cargo-cache-fallback-key: cargo-nightly
 
       - name: Install grcov
-        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2.3.1
+        uses: taiki-e/cache-cargo-install-action@9ee83daaa7b96a6fab930949ecf1122bba04a389 # v3.0.8
         with:
           tool: grcov
 
