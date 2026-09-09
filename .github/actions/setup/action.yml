@@ -77,53 +77,53 @@ runs:
 
     - name: Install stable toolchain
       if: ${{ inputs.stable-toolchain == 'true' }}
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
       with:
         toolchain: ${{ env.RUST_STABLE }}
 
     - name: Install minimum toolchain
       if: ${{ inputs.minimum-toolchain == 'true' }}
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
       with:
         toolchain: ${{ env.RUST_MINIMUM }}
 
     - name: Install nightly toolchain
       if: ${{ inputs.nightly-toolchain == 'true' }}
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
       with:
         toolchain: ${{ env.RUST_NIGHTLY }}
 
     - name: Install Rustfmt
       if: ${{ inputs.rustfmt == 'true' }}
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
       with:
         toolchain: ${{ env.RUST_NIGHTLY }}
         components: rustfmt
 
     - name: Install Clippy
       if: ${{ inputs.clippy == 'true' }}
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
       with:
         toolchain: ${{ env.RUST_NIGHTLY }}
         components: clippy
 
     - name: Install Miri
       if: ${{ inputs.miri == 'true' }}
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
       with:
         toolchain: ${{ env.RUST_NIGHTLY }}
         components: miri
 
     - name: Install llvm-tools-preview
       if: ${{ inputs.llvm-tools-preview == 'true' }}
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
       with:
         toolchain: ${{ env.RUST_NIGHTLY }}
         components: llvm-tools-preview
 
     - name: Install rust-src
       if: ${{ inputs.rust-src == 'true' }}
-      uses: dtolnay/rust-toolchain@master
+      uses: dtolnay/rust-toolchain@d1031067263f94b142dd6c0ce24c5eb9d02d52a0 # master
       with:
         toolchain: ${{ env.RUST_NIGHTLY }}
         components: rust-src
