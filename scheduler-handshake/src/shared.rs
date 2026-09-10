@@ -77,7 +77,8 @@ pub struct ClientLogon {
     pub check_worker_count: usize,
     /// The minimum allocator file size in bytes, this is shared by all allocator handles.
     pub allocator_size: usize,
-    /// The number of [`rts_alloc::Allocator`] handles the external process is requesting.
+    /// The number of [`rts_alloc::Allocator`] handles to provision for the external process,
+    /// including the initial handle returned in [`ClientSession::allocator`].
     pub allocator_handles: usize,
     /// The minimum capacity of the `tpu_to_pack` queue in messages.
     pub tpu_to_pack_capacity: usize,
@@ -118,7 +119,9 @@ pub mod logon_flags {}
 
 /// The complete initialized scheduling session.
 pub struct ClientSession {
-    pub allocators: Vec<Allocator>,
+    /// The initial allocator handle. Create additional handles with
+    /// [`Allocator::join_from_existing`] up to the provisioned [`ClientLogon::allocator_handles`].
+    pub allocator: Allocator,
     pub tpu_to_pack: shaq::spsc::Consumer<TpuToPackMessage>,
     pub progress_tracker: shaq::spsc::Consumer<ProgressMessage>,
     pub pack_to_check_worker: shaq::mpmc::Producer<PackToCheckWorkerMessage>,

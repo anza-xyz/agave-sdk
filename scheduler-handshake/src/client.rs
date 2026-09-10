@@ -159,10 +159,7 @@ pub fn setup_session(
         unreachable!();
     };
 
-    // Setup requested allocators.
-    let allocators = (0..logon.allocator_handles)
-        .map(|_| Allocator::join(allocator_file))
-        .collect::<Result<Vec<_>, _>>()?;
+    let allocator = Allocator::join(allocator_file)?;
 
     // Ensure worker file count matches expectations.
     if worker_files.is_empty()
@@ -175,7 +172,7 @@ pub fn setup_session(
     // NB: After creating & mapping the queues we are fine to drop the files as mmap will keep the
     // underlying object alive until process exit or munmap.
     let session = ClientSession {
-        allocators,
+        allocator,
         tpu_to_pack: unsafe { shaq::spsc::Consumer::join(tpu_to_pack_file)? },
         progress_tracker: unsafe { shaq::spsc::Consumer::join(progress_tracker_file)? },
         // SAFETY: the server initialized this FD as a matching MPMC consumer.
