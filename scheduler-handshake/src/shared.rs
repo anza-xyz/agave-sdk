@@ -104,6 +104,29 @@ pub struct ClientLogon {
 }
 
 impl ClientLogon {
+    /// Validates the worker counts and allocator handle count.
+    ///
+    /// This does not validate the allocator size or queue capacities.
+    pub fn validate(&self) -> Result<(), AgaveHandshakeError> {
+        if !(1..=MAX_WORKERS).contains(&self.worker_count) {
+            return Err(AgaveHandshakeError::WorkerCount(self.worker_count));
+        }
+
+        if !(1..=MAX_WORKERS).contains(&self.check_worker_count) {
+            return Err(AgaveHandshakeError::CheckWorkerCount(
+                self.check_worker_count,
+            ));
+        }
+
+        if !(1..=MAX_ALLOCATOR_HANDLES).contains(&self.allocator_handles) {
+            return Err(AgaveHandshakeError::AllocatorHandles(
+                self.allocator_handles,
+            ));
+        }
+
+        Ok(())
+    }
+
     pub fn try_from_bytes(buffer: &[u8]) -> Option<Self> {
         if buffer.len() != core::mem::size_of::<Self>() {
             return None;

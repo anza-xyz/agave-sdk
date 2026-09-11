@@ -3,7 +3,7 @@ use {
         AgaveHandshakeError, ClientHandshakeError, ClientLogon, ProtocolVersions,
         client::{connect, connect_path},
         server::Server,
-        shared::MAX_WORKERS,
+        shared::{MAX_ALLOCATOR_HANDLES, MAX_WORKERS},
     },
     agave_scheduler_bindings::{
         CheckResponseRegion, CheckWorkerToPackMessage, ExecutionResponseRegion,
@@ -311,6 +311,54 @@ fn message_passing_on_all_queues() {
 
     client_handle.join().unwrap();
     server_handle.join().unwrap();
+}
+
+#[test]
+fn setup_session_rejects_invalid_worker_counts() {
+    for count in [0, MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
+        let result = Server::setup_session(ClientLogon {
+            worker_count: count,
+            check_worker_count: 1,
+            allocator_handles: 1,
+            ..ClientLogon::default()
+        });
+        let Err(AgaveHandshakeError::WorkerCount(actual)) = result else {
+            panic!("expected WorkerCount error for {count}");
+        };
+        assert_eq!(actual, count);
+    }
+}
+
+#[test]
+fn setup_session_rejects_invalid_check_worker_counts() {
+    for count in [0, MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
+        let result = Server::setup_session(ClientLogon {
+            worker_count: 1,
+            check_worker_count: count,
+            allocator_handles: 1,
+            ..ClientLogon::default()
+        });
+        let Err(AgaveHandshakeError::CheckWorkerCount(actual)) = result else {
+            panic!("expected CheckWorkerCount error for {count}");
+        };
+        assert_eq!(actual, count);
+    }
+}
+
+#[test]
+fn setup_session_rejects_invalid_allocator_handles() {
+    for count in [0, MAX_ALLOCATOR_HANDLES.checked_add(1).unwrap(), usize::MAX] {
+        let result = Server::setup_session(ClientLogon {
+            worker_count: 1,
+            check_worker_count: 1,
+            allocator_handles: count,
+            ..ClientLogon::default()
+        });
+        let Err(AgaveHandshakeError::AllocatorHandles(actual)) = result else {
+            panic!("expected AllocatorHandles error for {count}");
+        };
+        assert_eq!(actual, count);
+    }
 }
 
 #[test]

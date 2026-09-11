@@ -2,10 +2,7 @@ use {
     crate::{
         AgaveCheckWorkerSession, AgaveHandshakeError, AgaveTpuToPackSession, AgaveWorkerSession,
         ClientLogon, ProtocolVersions,
-        shared::{
-            AgaveSession, GLOBAL_ALLOCATORS, LOGON_FAILURE, LOGON_SUCCESS, MAX_ALLOCATOR_HANDLES,
-            MAX_WORKERS,
-        },
+        shared::{AgaveSession, GLOBAL_ALLOCATORS, LOGON_FAILURE, LOGON_SUCCESS},
     },
     agave_scheduler_bindings::{
         CheckWorkerToPackMessage, PackToCheckWorkerMessage, PackToExecutionWorkerMessage,
@@ -135,30 +132,14 @@ impl Server {
             ClientLogon::try_from_bytes(&self.buffer[ProtocolVersions::SERIALIZED_SIZE..LOGON_END])
                 .unwrap();
 
-        // Put a hard limit of 64 worker threads for now.
-        if !(1..=MAX_WORKERS).contains(&logon.worker_count) {
-            return Err(AgaveHandshakeError::WorkerCount(logon.worker_count));
-        }
-
-        if !(1..=MAX_WORKERS).contains(&logon.check_worker_count) {
-            return Err(AgaveHandshakeError::CheckWorkerCount(
-                logon.check_worker_count,
-            ));
-        }
-
-        // Hard limit allocator handles to 128.
-        if !(1..=MAX_ALLOCATOR_HANDLES).contains(&logon.allocator_handles) {
-            return Err(AgaveHandshakeError::AllocatorHandles(
-                logon.allocator_handles,
-            ));
-        }
-
         Ok(logon)
     }
 
     pub fn setup_session(
         logon: ClientLogon,
     ) -> Result<(AgaveSession, Vec<File>), AgaveHandshakeError> {
+        logon.validate()?;
+
         // Setup the allocator in shared memory (`worker_count`, `check_worker_count`, and
         // `allocator_handles` have been validated so this won't panic).
         let (allocator_file, tpu_to_pack_allocator) = Self::create_allocator(&logon)?;
