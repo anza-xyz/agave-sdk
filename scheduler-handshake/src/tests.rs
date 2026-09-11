@@ -559,7 +559,9 @@ fn check_worker_queues_use_dedicated_capacities() {
             .unwrap()
     );
 
-    crate::client::setup_session(&logon, files).unwrap();
+    // SAFETY: These files came directly from server setup and their client endpoints have not
+    // been joined. Their order and message types are unchanged.
+    unsafe { crate::client::setup_session(&logon, files).unwrap() };
 }
 
 #[test]

@@ -135,7 +135,8 @@ impl Server {
         Ok(logon)
     }
 
-    pub fn setup_session(
+    /// Creates the server endpoints and files in protocol order for one client setup.
+    pub(crate) fn setup_session(
         logon: ClientLogon,
     ) -> Result<(AgaveSession, Vec<File>), AgaveHandshakeError> {
         logon.validate()?;

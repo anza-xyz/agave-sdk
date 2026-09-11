@@ -27,7 +27,9 @@ pub fn setup_local_session(
     logon: ClientLogon,
 ) -> Result<(AgaveSession, ClientSession), SessionSetupError> {
     let (agave, files) = server::Server::setup_session(logon)?;
-    let client = client::setup_session(&logon, files)?;
+    // SAFETY: Server setup initialized these files in protocol order with matching message
+    // types. The client SPSC endpoints have not been joined, and we join them only once.
+    let client = unsafe { client::setup_session(&logon, files)? };
     Ok((agave, client))
 }
 

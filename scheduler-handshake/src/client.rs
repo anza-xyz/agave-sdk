@@ -70,8 +70,9 @@ pub(crate) fn connect_path(
     // Receive the server's response & on success the files for the newly allocated shared memory.
     let files = recv_response(&mut stream)?;
 
-    // Join the shared memory regions.
-    let session = setup_session(&logon, files)?;
+    // SAFETY: We trust the server to supply initialized files in protocol order with matching
+    // message types and unused client SPSC endpoints. This connection joins them only once.
+    let session = unsafe { setup_session(&logon, files)? };
 
     Ok(session)
 }
@@ -145,7 +146,14 @@ fn recv_response(stream: &mut UnixStream) -> Result<Vec<File>, ClientHandshakeEr
     Ok(files)
 }
 
-pub fn setup_session(
+/// Joins the client endpoints from files created by the matching server setup.
+///
+/// # Safety
+///
+/// Files must contain initialized queues in protocol order with matching message types.
+/// Each SPSC client endpoint must be unique: no other producer or consumer, respectively,
+/// may have created or joined that endpoint. File-count checks do not establish these requirements.
+pub(crate) unsafe fn setup_session(
     logon: &ClientLogon,
     files: Vec<File>,
 ) -> Result<ClientSession, ClientHandshakeError> {
