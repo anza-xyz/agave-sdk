@@ -159,6 +159,15 @@ pub struct ClientWorkerSession {
     pub worker_to_pack: shaq::spsc::Consumer<ExecutionWorkerToPackMessage>,
 }
 
+/// Potential errors when creating both sides of a local scheduling session.
+#[derive(Debug, Error)]
+pub enum SessionSetupError {
+    #[error("Server session setup failed: {0}")]
+    Server(#[from] AgaveHandshakeError),
+    #[error("Client session setup failed: {0}")]
+    Client(#[from] ClientHandshakeError),
+}
+
 /// Potential errors that can occur during the client's side of the handshake.
 #[derive(Debug, Error)]
 pub enum ClientHandshakeError {

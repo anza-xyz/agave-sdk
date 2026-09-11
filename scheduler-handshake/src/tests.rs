@@ -314,6 +314,169 @@ fn message_passing_on_all_queues() {
 }
 
 #[test]
+fn local_session_message_passing_on_all_queues() {
+    let logon = ClientLogon {
+        worker_count: 2,
+        check_worker_count: 2,
+        allocator_size: 64 * 1024 * 1024,
+        allocator_handles: 1,
+        tpu_to_pack_capacity: 2,
+        progress_tracker_capacity: 2,
+        pack_to_worker_capacity: 2,
+        worker_to_pack_capacity: 2,
+        flags: 21,
+        pack_to_check_worker_capacity: 2,
+        check_worker_to_pack_capacity: 2,
+    };
+    let (mut agave, mut client) = crate::setup_local_session(logon).unwrap();
+    assert_eq!(agave.flags, logon.flags);
+    assert_eq!(agave.workers.len(), logon.worker_count);
+    assert_eq!(client.workers.len(), logon.worker_count);
+    assert_eq!(agave.check_workers.len(), logon.check_worker_count);
+
+    // Test messages.
+    let tpu_to_pack = TpuToPackMessage {
+        transaction: SharableTransactionRegion {
+            offset: 10,
+            length: 5,
+        },
+        flags: 21,
+        src_addr: [4; 16],
+    };
+    let progress_tracker = ProgressMessage {
+        leader_state: agave_scheduler_bindings::LEADER_READY,
+        current_slot_progress: 32,
+        epoch: 7,
+        current_slot: 3,
+        next_leader_slot: 12,
+        leader_range_end: 16,
+        remaining_cost_units: 12_000_000,
+        remaining_allocated_accounts_data_size: 20_000_000,
+        latest_blockhash: [42; 32],
+        target_bank_time_ms: 0,
+    };
+    let batch = SharableTransactionBatchRegion {
+        num_transactions: 5,
+        transactions_offset: 100,
+    };
+    let pack_to_check_worker = PackToCheckWorkerMessage { flags: 123, batch };
+    let pack_to_worker = PackToExecutionWorkerMessage {
+        flags: 1,
+        max_working_slot: 100,
+        batch,
+    };
+    let check_worker_to_pack = CheckWorkerToPackMessage {
+        batch,
+        processed_code: agave_scheduler_bindings::processed_codes::PROCESSED,
+        responses: CheckResponseRegion {
+            num_transaction_responses: 2,
+            transaction_responses_offset: 1,
+        },
+    };
+    let worker_to_pack = ExecutionWorkerToPackMessage {
+        batch,
+        processed_code: agave_scheduler_bindings::processed_codes::PROCESSED,
+        responses: ExecutionResponseRegion {
+            num_transaction_responses: 2,
+            transaction_responses_offset: 1,
+        },
+    };
+
+    agave.tpu_to_pack.producer.try_write(tpu_to_pack).unwrap();
+    assert_eq!(client.tpu_to_pack.try_read(), Some(tpu_to_pack));
+    agave.progress_tracker.try_write(progress_tracker).unwrap();
+    assert_eq!(client.progress_tracker.try_read(), Some(progress_tracker));
+
+    for (agave_worker, client_worker) in agave.workers.iter_mut().zip(&mut client.workers) {
+        client_worker
+            .pack_to_worker
+            .try_write(pack_to_worker)
+            .unwrap();
+        assert_eq!(agave_worker.pack_to_worker.try_read(), Some(pack_to_worker));
+        agave_worker
+            .worker_to_pack
+            .try_write(worker_to_pack)
+            .unwrap();
+        assert_eq!(
+            client_worker.worker_to_pack.try_read(),
+            Some(worker_to_pack)
+        );
+    }
+    for worker in &agave.check_workers {
+        client
+            .pack_to_check_worker
+            .try_write(pack_to_check_worker)
+            .unwrap();
+        assert_eq!(
+            worker.pack_to_check_worker.try_read(),
+            Some(pack_to_check_worker)
+        );
+        worker
+            .check_worker_to_pack
+            .try_write(check_worker_to_pack)
+            .unwrap();
+        assert_eq!(
+            client.check_worker_to_pack.try_read(),
+            Some(check_worker_to_pack)
+        );
+    }
+}
+
+#[test]
+fn local_session_rejects_invalid_worker_count() {
+    for count in [0, MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
+        let result = crate::setup_local_session(ClientLogon {
+            worker_count: count,
+            check_worker_count: 1,
+            allocator_handles: 1,
+            ..ClientLogon::default()
+        });
+        let Err(crate::SessionSetupError::Server(AgaveHandshakeError::WorkerCount(actual))) =
+            result
+        else {
+            panic!("expected WorkerCount error for {count}");
+        };
+        assert_eq!(actual, count);
+    }
+}
+
+#[test]
+fn local_session_rejects_invalid_check_worker_count() {
+    for count in [0, MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
+        let result = crate::setup_local_session(ClientLogon {
+            worker_count: 1,
+            check_worker_count: count,
+            allocator_handles: 1,
+            ..ClientLogon::default()
+        });
+        let Err(crate::SessionSetupError::Server(AgaveHandshakeError::CheckWorkerCount(actual))) =
+            result
+        else {
+            panic!("expected CheckWorkerCount error for {count}");
+        };
+        assert_eq!(actual, count);
+    }
+}
+
+#[test]
+fn local_session_rejects_invalid_allocator_handles() {
+    for count in [0, MAX_ALLOCATOR_HANDLES.checked_add(1).unwrap(), usize::MAX] {
+        let result = crate::setup_local_session(ClientLogon {
+            worker_count: 1,
+            check_worker_count: 1,
+            allocator_handles: count,
+            ..ClientLogon::default()
+        });
+        let Err(crate::SessionSetupError::Server(AgaveHandshakeError::AllocatorHandles(actual))) =
+            result
+        else {
+            panic!("expected AllocatorHandles error for {count}");
+        };
+        assert_eq!(actual, count);
+    }
+}
+
+#[test]
 fn setup_session_rejects_invalid_worker_counts() {
     for count in [0, MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
         let result = Server::setup_session(ClientLogon {
