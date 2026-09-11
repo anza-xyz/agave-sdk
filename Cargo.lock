@@ -52,7 +52,7 @@ dependencies = [
  "bytes",
  "criterion",
  "solana-hash",
- "solana-instruction",
+ "solana-instruction 4.0.0",
  "solana-keypair",
  "solana-message",
  "solana-packet",
@@ -1327,6 +1327,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "solana-instruction"
+version = "4.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ea8442b67a58dd54d5497bfc6cd3106b00f9fe6f6877d33c271c3ec4672eedc"
+dependencies = [
+ "solana-define-syscall",
+ "solana-pubkey",
+]
+
+[[package]]
 name = "solana-instruction-error"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1360,7 +1370,7 @@ checksum = "ef4b58f6d685adebefc945f28cf051cf3c11e295233e6dd3adfc0a71c3c6fb76"
 dependencies = [
  "solana-address",
  "solana-hash",
- "solana-instruction",
+ "solana-instruction 3.5.0",
  "solana-sanitize",
  "solana-sdk-ids",
  "solana-short-vec",
@@ -1485,7 +1495,7 @@ checksum = "2e2d5311d0584af231c6c2b0503ba1c3aa50118ead4f503ab215ccbdd1ffac57"
 dependencies = [
  "num-traits",
  "solana-address",
- "solana-instruction",
+ "solana-instruction 3.5.0",
  "solana-msg",
  "solana-program-error",
  "wincode",
@@ -1499,7 +1509,7 @@ checksum = "444a979f617ef7ed4e01aa228800df52d0af55f533e1840e8d48d468e607885f"
 dependencies = [
  "solana-address",
  "solana-hash",
- "solana-instruction",
+ "solana-instruction 3.5.0",
  "solana-instruction-error",
  "solana-message",
  "solana-sanitize",
