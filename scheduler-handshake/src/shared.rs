@@ -87,14 +87,15 @@ pub struct ClientLogon {
     pub pack_to_worker_capacity: usize,
     /// The minimum capacity of the `worker_to_pack` queue in messages.
     pub worker_to_pack_capacity: usize,
-    /// Flags that control the behavior of the new scheduling session.
-    pub flags: u16,
     /// The minimum capacity of the scheduler-to-check-worker queue in messages.
     pub pack_to_check_worker_capacity: usize,
     /// The minimum capacity of the check-worker-to-scheduler queue in messages.
     pub check_worker_to_pack_capacity: usize,
+    /// Flags that control the behavior of the new scheduling session.
+    pub flags: u64,
     // NB: If adding more fields please ensure:
     // - The fields are zeroable.
+    // - The struct has no padding, including trailing padding, because it is sent as raw bytes.
     // - If possible the fields are backwards compatible:
     //   - Added to the end of the struct.
     //   - 0 bytes is valid default (older clients will not have the field and thus send zeroes).
@@ -151,7 +152,7 @@ pub enum ClientHandshakeError {
 
 /// An initialized scheduling session.
 pub struct AgaveSession {
-    pub flags: u16,
+    pub flags: u64,
     pub tpu_to_pack: AgaveTpuToPackSession,
     pub progress_tracker: shaq::spsc::Producer<ProgressMessage>,
     pub check_workers: Vec<AgaveCheckWorkerSession>,
