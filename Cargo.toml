@@ -54,7 +54,7 @@ solana-pubkey = { version = "4.3.0", default-features = false }
 solana-sdk-ids = "3.1.0"
 solana-short-vec = "3.3.0"
 solana-signature = { version = "3.5.1", default-features = false }
-solana-signer = "3.0.1"
+solana-signer = "4.0.0"
 solana-svm-transaction = "5.0.0"
 solana-system-interface = { version = "3.3", features = ["alloc", "wincode"] }
 solana-transaction = "4.2.0"
