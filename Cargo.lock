@@ -1705,8 +1705,7 @@ dependencies = [
 [[package]]
 name = "wincode-dynamic"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90aeebbaf013fb2b6cd62e6310b045f4ad18f74a29a340d0c0b2bd6fadf10bfd"
+source = "git+https://github.com/cpubot/wincode-dynamic?rev=f6241bd81653dd7f6584833e79cfd107465fbf7c#f6241bd81653dd7f6584833e79cfd107465fbf7c"
 dependencies = [
  "wincode",
  "wincode-dynamic-derive",
@@ -1715,8 +1714,7 @@ dependencies = [
 [[package]]
 name = "wincode-dynamic-derive"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2d5cef58bddd25f3e0ffb28400e760784e42cf88e94d61157623c19bc87b2c9"
+source = "git+https://github.com/cpubot/wincode-dynamic?rev=f6241bd81653dd7f6584833e79cfd107465fbf7c#f6241bd81653dd7f6584833e79cfd107465fbf7c"
 dependencies = [
  "darling",
  "proc-macro2",

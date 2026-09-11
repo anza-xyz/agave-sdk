@@ -62,7 +62,7 @@ syn = "3.0.4"
 tempfile = "3.27.0"
 thiserror = "2.0.20"
 wincode = { version = "0.6.1", features = ["derive"] }
-wincode-dynamic = { version = "0.2.0" }
+wincode-dynamic = { git = "https://github.com/cpubot/wincode-dynamic", rev = "f6241bd81653dd7f6584833e79cfd107465fbf7c" }  # master revision
 
 [profile.release]
 split-debuginfo = "unpacked"
