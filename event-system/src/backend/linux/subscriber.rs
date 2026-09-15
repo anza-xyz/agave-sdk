@@ -171,75 +171,8 @@ impl AvailableStream {
         )
         .map_err(io::Error::from)?;
 
-        let mut schema_file = File::from(
-            openat(
-                &stream_directory,
-                SCHEMA_FILE_NAME,
-                OFlag::O_RDONLY | OFlag::O_CLOEXEC,
-                Mode::empty(),
-            )
-            .map_err(io::Error::from)?,
-        );
-
-        let queue_file_entry = stream_directory
-            .iter()
-            .filter_map(Result::ok)
-            .find(|entry| {
-                entry
-                    .file_name()
-                    .to_str()
-                    .is_ok_and(|name| name.starts_with(QUEUE_FILE_NAME_PREFIX))
-            })
-            .ok_or(CreateAvailableStreamError::QueueFileIsNotPublished)?;
-
-        let expected_broadcast_identifier = queue_file_entry
-            .file_name()
-            .to_str()
-            .ok()
-            .and_then(|name| name.strip_prefix(QUEUE_FILE_NAME_PREFIX))
-            .and_then(|identifier| identifier.parse::<u64>().ok())
-            .ok_or(CreateAvailableStreamError::InvalidQueueIdentifier)?;
-
-        let queue_file = File::from(
-            openat(
-                &stream_directory,
-                queue_file_entry.file_name(),
-                OFlag::O_RDWR | OFlag::O_CLOEXEC,
-                Mode::empty(),
-            )
-            .map_err(io::Error::from)?,
-        );
-        let queue_file_fd = queue_file.as_raw_fd();
-
-        // SAFETY: queue_file_fd is a valid file descriptor and F_GET_SEALS takes no argument.
-        let queue_file_seals = unsafe { libc::fcntl(queue_file_fd, libc::F_GET_SEALS) };
-        let queue_file_is_not_sealed = (queue_file_seals & REQUIRED_SEALS) != REQUIRED_SEALS;
-        let seal_check_failed = queue_file_seals == -1;
-
-        if seal_check_failed || queue_file_is_not_sealed {
-            return Err(CreateAvailableStreamError::QueueIsNotSealed);
-        }
-
-        // SAFETY:
-        // - file is a live broadcast queue, and checked above to be sealed against resizing.
-        // - the payload, Event::QueueCell guarantees fully byte initialization.
-        // - Event::QueueCell can always be decoded as bytes.
-        let broadcast_handle = unsafe { Broadcast::join_untyped(&queue_file) }?;
-
-        let actual_broadcast_identifier = broadcast_handle.queue_identifier();
-
-        // The producer's descriptor number may be reused for another queue
-        // before opening the queue's /proc symlink above.
-        if expected_broadcast_identifier != actual_broadcast_identifier {
-            return Err(CreateAvailableStreamError::QueueIdentifierMismatch {
-                expected: expected_broadcast_identifier,
-                actual: actual_broadcast_identifier,
-            });
-        }
-
-        let mut encoded_schema = Vec::new();
-        schema_file.read_to_end(&mut encoded_schema)?;
-        let schema: RootSchema = wincode::deserialize(&encoded_schema)?;
+        let schema = read_schema(&stream_directory)?;
+        let broadcast_handle = open_queue(&mut stream_directory)?;
 
         Ok(Self {
             stream_name,
@@ -247,6 +180,85 @@ impl AvailableStream {
             broadcast_handle,
         })
     }
+}
+
+fn open_queue(
+    stream_directory: &mut Dir,
+) -> Result<Broadcast<UnknownType>, CreateAvailableStreamError> {
+    let queue_file_entry = stream_directory
+        .iter()
+        .filter_map(Result::ok)
+        .find(|entry| {
+            entry
+                .file_name()
+                .to_str()
+                .is_ok_and(|name| name.starts_with(QUEUE_FILE_NAME_PREFIX))
+        })
+        .ok_or(CreateAvailableStreamError::QueueFileIsNotPublished)?;
+
+    let expected_broadcast_identifier = queue_file_entry
+        .file_name()
+        .to_str()
+        .ok()
+        .and_then(|name| name.strip_prefix(QUEUE_FILE_NAME_PREFIX))
+        .and_then(|identifier| identifier.parse::<u64>().ok())
+        .ok_or(CreateAvailableStreamError::InvalidQueueIdentifier)?;
+
+    let queue_file = File::from(
+        openat(
+            &*stream_directory,
+            queue_file_entry.file_name(),
+            OFlag::O_RDWR | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(io::Error::from)?,
+    );
+    let queue_file_fd = queue_file.as_raw_fd();
+
+    // SAFETY: queue_file_fd is a valid file descriptor and F_GET_SEALS takes no argument.
+    let queue_file_seals = unsafe { libc::fcntl(queue_file_fd, libc::F_GET_SEALS) };
+    let queue_file_is_not_sealed = (queue_file_seals & REQUIRED_SEALS) != REQUIRED_SEALS;
+    let seal_check_failed = queue_file_seals == -1;
+
+    if seal_check_failed || queue_file_is_not_sealed {
+        return Err(CreateAvailableStreamError::QueueIsNotSealed);
+    }
+
+    // SAFETY:
+    // - file is a live broadcast queue, and checked above to be sealed against resizing.
+    // - the payload, Event::QueueCell guarantees fully byte initialization.
+    // - Event::QueueCell can always be decoded as bytes.
+    let broadcast_handle = unsafe { Broadcast::join_untyped(&queue_file) }?;
+
+    let actual_broadcast_identifier = broadcast_handle.queue_identifier();
+
+    // The producer's descriptor number may be reused for another queue
+    // before opening the queue's /proc symlink above.
+    if expected_broadcast_identifier != actual_broadcast_identifier {
+        return Err(CreateAvailableStreamError::QueueIdentifierMismatch {
+            expected: expected_broadcast_identifier,
+            actual: actual_broadcast_identifier,
+        });
+    }
+
+    Ok(broadcast_handle)
+}
+
+fn read_schema(stream_directory: &Dir) -> Result<RootSchema, CreateAvailableStreamError> {
+    let mut schema_file = File::from(
+        openat(
+            stream_directory,
+            SCHEMA_FILE_NAME,
+            OFlag::O_RDONLY | OFlag::O_CLOEXEC,
+            Mode::empty(),
+        )
+        .map_err(io::Error::from)?,
+    );
+
+    let mut encoded_schema = Vec::new();
+    schema_file.read_to_end(&mut encoded_schema)?;
+    let schema: RootSchema = wincode::deserialize(&encoded_schema)?;
+    Ok(schema)
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -271,4 +283,167 @@ enum CreateAvailableStreamError {
     QueueFileIsNotPublished,
     #[error("failed to create a handle to the broadcast")]
     JoiningBroadcastFailed(#[from] shaq::error::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::{
+            CreateAvailableStreamError, Dir, Mode, OFlag, QUEUE_FILE_NAME_PREFIX, REQUIRED_SEALS,
+            STREAMS_DIRECTORY_NAME, open_queue,
+        },
+        crate::{EventSystem, ProducerFactory, StreamConfig, event},
+        nix::{
+            fcntl::{FcntlArg, SealFlag, fcntl},
+            sys::memfd::{MFdFlags, memfd_create},
+        },
+        rstest::rstest,
+        std::{
+            assert_matches,
+            fs::File,
+            os::{fd::AsRawFd, unix::fs::symlink},
+            path::PathBuf,
+        },
+        tempfile::TempDir,
+    };
+
+    #[event]
+    struct TestEvent {
+        value: u64,
+    }
+
+    struct TestStream {
+        path: PathBuf,
+        queue_path: PathBuf,
+        _producer_factory: ProducerFactory<TestEvent>,
+        _directory: TempDir,
+    }
+
+    impl TestStream {
+        fn new() -> Self {
+            let directory = TempDir::new().unwrap();
+            let event_system = EventSystem::new(directory.path()).unwrap();
+            let producer_factory = event_system
+                .create_stream::<TestEvent>(
+                    "test-stream",
+                    StreamConfig {
+                        capacity: 2,
+                        producer_slots: 1,
+                        consumer_slots: 1,
+                    },
+                )
+                .unwrap();
+            let path = directory
+                .path()
+                .join(STREAMS_DIRECTORY_NAME)
+                .join("test-stream");
+            let queue_path = std::fs::read_dir(&path)
+                .unwrap()
+                .map(Result::unwrap)
+                .find(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .unwrap()
+                        .starts_with(QUEUE_FILE_NAME_PREFIX)
+                })
+                .unwrap()
+                .path();
+            Self {
+                path,
+                queue_path,
+                _producer_factory: producer_factory,
+                _directory: directory,
+            }
+        }
+
+        fn open_directory(&self) -> Dir {
+            Dir::open(
+                &self.path,
+                OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_DIRECTORY,
+                Mode::empty(),
+            )
+            .unwrap()
+        }
+    }
+
+    #[rstest]
+    #[case::empty("queue-")]
+    #[case::non_numeric("queue-invalid")]
+    #[case::overflow("queue-18446744073709551616")]
+    fn open_queue_rejects_invalid_identifier(#[case] name: &str) {
+        let stream = TestStream::new();
+        let mut stream_directory = stream.open_directory();
+
+        std::fs::rename(&stream.queue_path, stream.path.join(name)).unwrap();
+
+        assert_matches!(
+            open_queue(&mut stream_directory),
+            Err(CreateAvailableStreamError::InvalidQueueIdentifier)
+        );
+    }
+
+    #[test]
+    fn open_queue_rejects_mismatched_identifier() {
+        let stream = TestStream::new();
+        let mut stream_directory = stream.open_directory();
+        let actual_identifier = open_queue(&mut stream_directory)
+            .unwrap()
+            .queue_identifier();
+        let published_identifier = actual_identifier + 1;
+
+        std::fs::rename(
+            &stream.queue_path,
+            stream
+                .path
+                .join(format!("{QUEUE_FILE_NAME_PREFIX}{published_identifier}")),
+        )
+        .unwrap();
+
+        assert_matches!(
+            open_queue(&mut stream_directory),
+            Err(CreateAvailableStreamError::QueueIdentifierMismatch { expected, actual })
+                if expected == published_identifier && actual == actual_identifier
+        );
+    }
+
+    #[rstest]
+    #[case::unsealed(0)]
+    #[case::missing_shrink(REQUIRED_SEALS & !libc::F_SEAL_SHRINK)]
+    #[case::missing_grow(REQUIRED_SEALS & !libc::F_SEAL_GROW)]
+    #[case::missing_seal(REQUIRED_SEALS & !libc::F_SEAL_SEAL)]
+    fn open_queue_rejects_missing_seals(#[case] seals: libc::c_int) {
+        const TEST_QUEUE_IDENTIFIER: u16 = 42;
+
+        let queue_file = File::from(
+            memfd_create(
+                "test-queue",
+                MFdFlags::MFD_CLOEXEC | MFdFlags::MFD_ALLOW_SEALING,
+            )
+            .unwrap(),
+        );
+        let seal_flags = SealFlag::from_bits(seals).unwrap();
+        fcntl(&queue_file, FcntlArg::F_ADD_SEALS(seal_flags)).unwrap();
+
+        let stream_directory = TempDir::new().unwrap();
+
+        let proc_fd_path = format!("/proc/self/fd/{}", queue_file.as_raw_fd());
+        let stream_queue_directory_path = stream_directory
+            .path()
+            .join(format!("{QUEUE_FILE_NAME_PREFIX}{TEST_QUEUE_IDENTIFIER}"));
+
+        symlink(proc_fd_path, stream_queue_directory_path).unwrap();
+
+        let mut stream_directory = Dir::open(
+            stream_directory.path(),
+            OFlag::O_RDONLY | OFlag::O_CLOEXEC | OFlag::O_DIRECTORY,
+            Mode::empty(),
+        )
+        .unwrap();
+
+        assert_matches!(
+            open_queue(&mut stream_directory),
+            Err(CreateAvailableStreamError::QueueIsNotSealed)
+        );
+    }
 }
