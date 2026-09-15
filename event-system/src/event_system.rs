@@ -50,7 +50,11 @@ impl std::fmt::Debug for EventSystem {
 pub struct StreamConfig {
     /// Number of events retained in each producer queue.
     pub capacity: usize,
-    /// Maximum number of concurrent producers.
+    /// Maximum number of producers that can be created for the stream.
+    ///
+    /// # NB!
+    /// This slot count is a lifetime budget. Dropping a producer permanently retires
+    /// that slot forever.
     pub producer_slots: usize,
     /// Maximum number of concurrent consumers.
     pub consumer_slots: usize,

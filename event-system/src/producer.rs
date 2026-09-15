@@ -15,7 +15,18 @@ pub struct Producer<E: Event> {
 
 impl<E: Event> Producer<E> {
     pub fn emit_event(&mut self, event: &E) -> Result<(), EmitEventError> {
-        self.inner.emit_event(event)
+        self.emit_events_batched(std::array::from_ref(event))
+    }
+
+    /// Emits the given batch of events on the stream.
+    ///
+    /// # Errors
+    /// If any event in the batch fails to send, [`EmitEventError`] is returned
+    /// and the remaining events in the batch are dropped.
+    ///
+    /// The events previous to the failing event are all sent.
+    pub fn emit_events_batched(&mut self, events: &[E]) -> Result<(), EmitEventError> {
+        self.inner.emit_events_batched(events)
     }
 
     pub(crate) fn new(inner: backend::Producer<E>) -> Self {

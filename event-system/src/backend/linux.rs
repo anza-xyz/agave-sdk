@@ -1,4 +1,3 @@
-pub(crate) use producer::Producer;
 use {
     crate::{
         Event,
@@ -19,9 +18,17 @@ use {
         sync::Arc,
     },
 };
+pub(crate) use {
+    producer::Producer,
+    subscriber::{
+        AvailableStream, ProducerMetadata, StreamExplorer, StreamMessage, StreamSubscriber,
+    },
+};
 
 #[path = "linux/producer.rs"]
 mod producer;
+#[path = "linux/subscriber.rs"]
+mod subscriber;
 
 // Layout of the event-system directory:
 //
@@ -38,7 +45,7 @@ mod producer;
 //         ├── queue-<id>
 //         └── schema
 //
-const QUEUE_FILE_NAME: &str = "queue";
+const QUEUE_FILE_NAME_PREFIX: &str = "queue-";
 const SCHEMA_FILE_NAME: &str = "schema";
 
 const STAGING_DIRECTORY_NAME: &str = "tmp";
@@ -115,7 +122,7 @@ impl EventSystem {
             .map_err(CreateStreamError::OsRngFailure)?;
         let (broadcast, queue_file) = create_sealed_queue::<E>(stream_config, queue_identifier)?;
 
-        let queue_file_name = format!("{QUEUE_FILE_NAME}-{queue_identifier}");
+        let queue_file_name = format!("{QUEUE_FILE_NAME_PREFIX}{queue_identifier}");
         let queue_file_path = temporary_event_stream_directory
             .path()
             .join(queue_file_name);

@@ -1,7 +1,7 @@
 pub use wincode::ReadError;
 use {
     crate::backend,
-    std::{marker::PhantomData, path::PathBuf},
+    std::{marker::PhantomData, path::PathBuf, time::Duration},
     wincode::Deserialize,
     wincode_dynamic::{Decoder, Fields, RootSchema},
 };
@@ -82,6 +82,16 @@ impl<Mode> StreamSubscriber<Mode> {
     /// Returns a message if there is any unseen message in the stream.
     pub fn try_recv(&mut self) -> Result<StreamMessage<'_, Mode>, TryRecvError> {
         self.backend.try_recv().map(StreamMessage::new)
+    }
+
+    /// Blocks until an unseen event arrives on the stream or timeout duration elapses.
+    pub fn try_recv_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<StreamMessage<'_, Mode>, RecvTimeoutError> {
+        self.backend
+            .try_recv_timeout(timeout)
+            .map(StreamMessage::new)
     }
 
     fn new(backend: backend::StreamSubscriber) -> Self {
@@ -229,6 +239,12 @@ pub enum TryRecvError {
     Empty,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum RecvTimeoutError {
+    #[error("timed out waiting on stream")]
+    Timeout,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum TryConnectTypedError {
     #[error("stream schema does not match the requested type")]
@@ -245,7 +261,10 @@ pub struct SchemaMismatch {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum TryConnectError {}
+pub enum TryConnectError {
+    #[error("the stream has no available subscriber slots")]
+    SubscriberSlotsExhausted,
+}
 
 /// A decoded dynamically typed message. Messages can either be an enum or a struct.
 #[derive(Debug)]

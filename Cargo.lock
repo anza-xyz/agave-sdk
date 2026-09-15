@@ -9,6 +9,7 @@ dependencies = [
  "agave-event-system-derive",
  "getrandom 0.4.3",
  "libc",
+ "nix",
  "rstest",
  "shaq",
  "tempfile",

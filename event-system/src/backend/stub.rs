@@ -9,6 +9,7 @@ use {
         fmt::Debug,
         marker::PhantomData,
         path::{Path, PathBuf},
+        time::Duration,
     },
     wincode_dynamic::RootSchema,
 };
@@ -24,7 +25,7 @@ impl<E> Debug for Producer<E> {
 }
 
 impl<E> Producer<E> {
-    pub(crate) fn emit_event(&mut self, _event: &E) -> Result<(), EmitEventError> {
+    pub(crate) fn emit_events_batched(&mut self, _events: &[E]) -> Result<(), EmitEventError> {
         Ok(())
     }
 }
@@ -109,6 +110,13 @@ impl StreamSubscriber {
 
     pub(crate) fn try_recv(&mut self) -> Result<StreamMessage<'_>, TryRecvError> {
         Err(TryRecvError::Empty)
+    }
+
+    pub fn try_recv_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<StreamMessage<'_, Mode>, RecvTimeoutError> {
+        Err(RecvTimeoutError::SubscriberSlotsExhausted)
     }
 }
 

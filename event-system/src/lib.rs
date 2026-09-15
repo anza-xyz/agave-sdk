@@ -28,7 +28,6 @@ use {
 };
 
 pub mod producer;
-#[cfg(not(target_os = "linux"))]
 pub mod subscriber;
 
 #[doc(hidden)]
