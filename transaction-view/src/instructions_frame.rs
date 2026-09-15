@@ -161,6 +161,8 @@ impl InstructionsFrame {
     /// `bytes[*offset..*offset + size_of::<V1InstructionHeader>()]` must be valid.
     #[inline(always)]
     unsafe fn read_v1_header(bytes: &[u8], offset: &mut usize) -> V1InstructionHeader {
+        // SAFETY: per the caller's guarantee, `bytes[*offset..]` holds a
+        // validly initialized `V1InstructionHeader`.
         let mut header: V1InstructionHeader = unsafe { unchecked_copy_value(bytes, *offset) };
         *offset = offset.wrapping_add(core::mem::size_of::<V1InstructionHeader>());
         header.data_len = u16::from_le(header.data_len);
@@ -252,6 +254,9 @@ impl<'a> Iterator for InstructionsIterator<'a> {
 
                 *index = index.wrapping_add(1);
 
+                // SAFETY: the frame was parsed above, so `offset` and the
+                // account and data lengths describe a valid instruction in
+                // `bytes`.
                 Some(unsafe {
                     for_legacy_and_v0(
                         bytes,
@@ -274,9 +279,14 @@ impl<'a> Iterator for InstructionsIterator<'a> {
                     return None;
                 }
 
+                // SAFETY: the frame was parsed above, so `headers_offset` is
+                // a valid offset into `bytes`.
                 let header = unsafe { InstructionsFrame::read_v1_header(bytes, headers_offset) };
                 *index = index.wrapping_add(1);
 
+                // SAFETY: the header was read from `bytes` above, so the
+                // program id index, account count, and data length describe a
+                // valid instruction in `bytes`.
                 Some(unsafe {
                     for_v1(
                         bytes,
@@ -705,6 +715,8 @@ mod tests {
                 assert_eq!(num_instructions, 1);
                 assert_eq!(headers_offset, 0);
                 assert_eq!(payloads_offset, 4);
+                // SAFETY: `bytes` was constructed above with a full
+                // instruction header at offset 0.
                 let hdr = unsafe { InstructionsFrame::read_v1_header(&bytes, &mut 0) };
                 assert_eq!(hdr.program_id_index, 9);
                 assert_eq!(hdr.num_accounts, 2);
@@ -744,10 +756,14 @@ mod tests {
                 assert_eq!(num_instructions, 2);
                 assert_eq!(headers_offset, 0);
                 assert_eq!(payloads_offset, 8);
+                // SAFETY: `bytes` was constructed above with a full
+                // instruction header at offset 0.
                 let hdr = unsafe { InstructionsFrame::read_v1_header(&bytes, &mut 0) };
                 assert_eq!(hdr.program_id_index, 1);
                 assert_eq!(hdr.num_accounts, 2);
                 assert_eq!(hdr.data_len, 1);
+                // SAFETY: `bytes` was constructed above with a full
+                // instruction header at offset 4.
                 let hdr = unsafe { InstructionsFrame::read_v1_header(&bytes, &mut 4) };
                 assert_eq!(hdr.program_id_index, 7);
                 assert_eq!(hdr.num_accounts, 1);
