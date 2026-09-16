@@ -3,7 +3,8 @@ use {
         AgaveCheckWorkerSession, AgaveHandshakeError, AgaveTpuToPackSession, AgaveWorkerSession,
         ClientLogon, ProtocolVersions,
         shared::{
-            AgaveSession, GLOBAL_ALLOCATORS, LOGON_FAILURE, LOGON_SUCCESS, checked_file_size,
+            AgaveSession, GLOBAL_ALLOCATORS, HUGE_PAGE_SIZE, LOGON_FAILURE, LOGON_SUCCESS,
+            PageSize, checked_file_size,
         },
     },
     agave_scheduler_bindings::{
@@ -149,9 +150,9 @@ impl Server {
 
         // Setup the global queues.
         let (tpu_to_pack_file, tpu_to_pack_queue) =
-            Self::create_producer(logon.tpu_to_pack_capacity, true)?;
+            Self::create_producer(logon.tpu_to_pack_capacity, PageSize::Huge)?;
         let (progress_tracker_file, progress_tracker) =
-            Self::create_producer(logon.progress_tracker_capacity, false)?;
+            Self::create_producer(logon.progress_tracker_capacity, PageSize::Standard)?;
         let (pack_to_check_worker_file, pack_to_check_worker) =
             Self::create_mpmc_consumer::<PackToCheckWorkerMessage>(
                 logon.pack_to_check_worker_capacity,
@@ -159,7 +160,7 @@ impl Server {
         let (check_worker_to_pack_file, check_worker_to_pack) =
             Self::create_mpmc_producer::<CheckWorkerToPackMessage>(
                 logon.check_worker_to_pack_capacity,
-                true,
+                PageSize::Huge,
             )?;
 
         let check_workers = (0..logon.check_worker_count)
@@ -181,7 +182,7 @@ impl Server {
                 let (pack_to_worker_file, pack_to_worker) =
                     Self::create_consumer(logon.pack_to_worker_capacity)?;
                 let (worker_to_pack_file, worker_to_pack) =
-                    Self::create_producer(logon.worker_to_pack_capacity, true)?;
+                    Self::create_producer(logon.worker_to_pack_capacity, PageSize::Huge)?;
 
                 fds.extend([pack_to_worker_file, worker_to_pack_file]);
                 workers.push(AgaveWorkerSession {
@@ -227,9 +228,9 @@ impl Server {
             .checked_add(logon.allocator_handles)
             .unwrap();
 
-        let create = |huge: bool| {
-            let allocator_file = Self::create_shmem(huge)?;
-            let allocator_file_size = Self::align_file_size(logon.allocator_size, huge)?;
+        let create = |page_size: PageSize| {
+            let allocator_file = Self::create_shmem(page_size)?;
+            let allocator_file_size = Self::align_file_size(logon.allocator_size, page_size)?;
 
             // SAFETY: We just created this file and thus can uniquely initialize it.
             unsafe {
@@ -237,24 +238,25 @@ impl Server {
                     &allocator_file,
                     allocator_file_size,
                     u32::try_from(allocator_count).unwrap(),
-                    2 * 1024 * 1024,
+                    // Allocator slab size: chosen as 2 MiB, but need not match the OS page size.
+                    HUGE_PAGE_SIZE as u32,
                 )
             }
             .map(|allocator| (allocator_file, allocator))
         };
 
         // Try to create with huge pages, fallback to regular pages.
-        create(true).or_else(|_| create(false))
+        create(PageSize::Huge).or_else(|_| create(PageSize::Standard))
     }
 
     fn create_producer<T>(
         capacity: usize,
-        huge: bool,
+        page_size: PageSize,
     ) -> Result<(File, shaq::spsc::Producer<T>), ShaqError> {
-        let create = |huge: bool| {
-            let file = Self::create_shmem(huge)?;
+        let create = |page_size: PageSize| {
+            let file = Self::create_shmem(page_size)?;
             let minimum_file_size = shaq::spsc::try_minimum_file_size::<T>(capacity)?;
-            let file_size = Self::align_file_size(minimum_file_size, huge)?;
+            let file_size = Self::align_file_size(minimum_file_size, page_size)?;
 
             // SAFETY: uniqely creating as producer
             unsafe { shaq::spsc::Producer::create(&file, file_size) }
@@ -262,20 +264,20 @@ impl Server {
         };
 
         // Try to create with huge pages, fallback to regular pages.
-        match huge {
-            true => create(true).or_else(|_| create(false)),
-            false => create(false),
+        match page_size {
+            PageSize::Huge => create(PageSize::Huge).or_else(|_| create(PageSize::Standard)),
+            PageSize::Standard => create(PageSize::Standard),
         }
     }
 
     fn create_consumer(
         capacity: usize,
     ) -> Result<(File, shaq::spsc::Consumer<PackToExecutionWorkerMessage>), ShaqError> {
-        let create = |huge: bool| {
-            let file = Self::create_shmem(huge)?;
+        let create = |page_size: PageSize| {
+            let file = Self::create_shmem(page_size)?;
             let minimum_file_size =
                 shaq::spsc::try_minimum_file_size::<PackToExecutionWorkerMessage>(capacity)?;
-            let file_size = Self::align_file_size(minimum_file_size, huge)?;
+            let file_size = Self::align_file_size(minimum_file_size, page_size)?;
 
             // SAFETY: uniquely creating as consumer.
             unsafe { shaq::spsc::Consumer::create(&file, file_size) }
@@ -283,43 +285,43 @@ impl Server {
         };
 
         // Try to create with huge pages, fallback to regular pages.
-        create(true).or_else(|_| create(false))
+        create(PageSize::Huge).or_else(|_| create(PageSize::Standard))
     }
 
     fn create_mpmc_producer<T>(
         capacity: usize,
-        huge: bool,
+        page_size: PageSize,
     ) -> Result<(File, shaq::mpmc::Producer<T>), ShaqError> {
-        let create = |huge: bool| {
-            let file = Self::create_shmem(huge)?;
+        let create = |page_size: PageSize| {
+            let file = Self::create_shmem(page_size)?;
             let minimum_file_size = shaq::mpmc::try_minimum_file_size::<T>(capacity)?;
-            let file_size = Self::align_file_size(minimum_file_size, huge)?;
+            let file_size = Self::align_file_size(minimum_file_size, page_size)?;
 
             // SAFETY: uniquely creating as producer.
             unsafe { shaq::mpmc::Producer::create(&file, file_size) }
                 .map(|producer| (file, producer))
         };
 
-        match huge {
-            true => create(true).or_else(|_| create(false)),
-            false => create(false),
+        match page_size {
+            PageSize::Huge => create(PageSize::Huge).or_else(|_| create(PageSize::Standard)),
+            PageSize::Standard => create(PageSize::Standard),
         }
     }
 
     fn create_mpmc_consumer<T>(
         capacity: usize,
     ) -> Result<(File, shaq::mpmc::Consumer<T>), ShaqError> {
-        let create = |huge: bool| {
-            let file = Self::create_shmem(huge)?;
+        let create = |page_size: PageSize| {
+            let file = Self::create_shmem(page_size)?;
             let minimum_file_size = shaq::mpmc::try_minimum_file_size::<T>(capacity)?;
-            let file_size = Self::align_file_size(minimum_file_size, huge)?;
+            let file_size = Self::align_file_size(minimum_file_size, page_size)?;
 
             // SAFETY: uniquely creating as consumer.
             unsafe { shaq::mpmc::Consumer::create(&file, file_size) }
                 .map(|consumer| (file, consumer))
         };
 
-        create(true).or_else(|_| create(false))
+        create(PageSize::Huge).or_else(|_| create(PageSize::Standard))
     }
 
     #[cfg(any(
@@ -328,10 +330,10 @@ impl Server {
         target_os = "android",
         target_os = "emscripten"
     ))]
-    fn create_shmem(huge: bool) -> Result<File, std::io::Error> {
-        let flags = match huge {
-            true => libc::MFD_HUGETLB | libc::MFD_HUGE_2MB,
-            false => 0,
+    fn create_shmem(page_size: PageSize) -> Result<File, std::io::Error> {
+        let flags = match page_size {
+            PageSize::Huge => libc::MFD_HUGETLB | libc::MFD_HUGE_2MB,
+            PageSize::Standard => 0,
         };
 
         unsafe {
@@ -350,8 +352,8 @@ impl Server {
         target_os = "android",
         target_os = "emscripten"
     )))]
-    fn create_shmem(huge: bool) -> Result<File, std::io::Error> {
-        if huge {
+    fn create_shmem(page_size: PageSize) -> Result<File, std::io::Error> {
+        if matches!(page_size, PageSize::Huge) {
             return Err(std::io::ErrorKind::Unsupported.into());
         }
 
@@ -393,8 +395,8 @@ impl Server {
         }
     }
 
-    fn align_file_size(size: usize, huge: bool) -> Result<usize, std::io::Error> {
-        checked_file_size(size, huge).ok_or_else(|| {
+    fn align_file_size(size: usize, page_size: PageSize) -> Result<usize, std::io::Error> {
+        checked_file_size(size, page_size).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "file size cannot be represented",

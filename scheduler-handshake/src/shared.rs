@@ -18,6 +18,26 @@ pub(crate) const LOGON_FAILURE: u8 = 0x02;
 pub(crate) const MAX_ALLOCATOR_HANDLES: usize = 128;
 pub(crate) const GLOBAL_ALLOCATORS: usize = 1;
 
+pub(crate) const STANDARD_PAGE_SIZE: usize = 4096;
+pub(crate) const HUGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
+// Mappings must fit within the signed offset range used by pointer arithmetic.
+pub(crate) const POINTER_OFFSET_LIMIT: usize = isize::MAX as usize;
+
+#[derive(Clone, Copy)]
+pub(crate) enum PageSize {
+    Standard,
+    Huge,
+}
+
+impl PageSize {
+    pub(crate) const fn bytes(self) -> usize {
+        match self {
+            Self::Standard => STANDARD_PAGE_SIZE,
+            Self::Huge => HUGE_PAGE_SIZE,
+        }
+    }
+}
+
 /// Versions of the interfaces shared by Agave and an external scheduler.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
@@ -124,44 +144,44 @@ impl ClientLogon {
             ));
         }
 
-        checked_file_size(self.allocator_size, true)
+        checked_file_size(self.allocator_size, PageSize::Huge)
             .ok_or(AgaveHandshakeError::AllocatorSize(self.allocator_size))?;
 
         validate_queue_capacity(
             "tpu_to_pack_capacity",
             self.tpu_to_pack_capacity,
             shaq::spsc::try_minimum_file_size::<TpuToPackMessage>,
-            true,
+            PageSize::Huge,
         )?;
         validate_queue_capacity(
             "progress_tracker_capacity",
             self.progress_tracker_capacity,
             shaq::spsc::try_minimum_file_size::<ProgressMessage>,
-            false,
+            PageSize::Standard,
         )?;
         validate_queue_capacity(
             "pack_to_worker_capacity",
             self.pack_to_worker_capacity,
             shaq::spsc::try_minimum_file_size::<PackToExecutionWorkerMessage>,
-            true,
+            PageSize::Huge,
         )?;
         validate_queue_capacity(
             "worker_to_pack_capacity",
             self.worker_to_pack_capacity,
             shaq::spsc::try_minimum_file_size::<ExecutionWorkerToPackMessage>,
-            true,
+            PageSize::Huge,
         )?;
         validate_queue_capacity(
             "pack_to_check_worker_capacity",
             self.pack_to_check_worker_capacity,
             shaq::mpmc::try_minimum_file_size::<PackToCheckWorkerMessage>,
-            true,
+            PageSize::Huge,
         )?;
         validate_queue_capacity(
             "check_worker_to_pack_capacity",
             self.check_worker_to_pack_capacity,
             shaq::mpmc::try_minimum_file_size::<CheckWorkerToPackMessage>,
-            true,
+            PageSize::Huge,
         )?;
 
         Ok(())
@@ -183,19 +203,19 @@ fn validate_queue_capacity(
     field: &'static str,
     capacity: usize,
     minimum_file_size: fn(usize) -> Result<usize, ShaqError>,
-    huge: bool,
+    page_size: PageSize,
 ) -> Result<(), AgaveHandshakeError> {
     let size = minimum_file_size(capacity)
         .map_err(|_| AgaveHandshakeError::QueueCapacity { field, capacity })?;
-    checked_file_size(size, huge).ok_or(AgaveHandshakeError::QueueCapacity { field, capacity })?;
+    checked_file_size(size, page_size)
+        .ok_or(AgaveHandshakeError::QueueCapacity { field, capacity })?;
     Ok(())
 }
 
 /// Rounds up to a page boundary while keeping the mapping size within pointer-offset limits.
-pub(crate) fn checked_file_size(size: usize, huge: bool) -> Option<usize> {
-    let page_size = if huge { 2 * 1024 * 1024 } else { 4096 };
-    size.checked_next_multiple_of(page_size)
-        .filter(|&size| size <= isize::MAX as usize)
+pub(crate) fn checked_file_size(size: usize, page_size: PageSize) -> Option<usize> {
+    size.checked_next_multiple_of(page_size.bytes())
+        .filter(|&size| size <= POINTER_OFFSET_LIMIT)
 }
 
 pub mod logon_flags {}

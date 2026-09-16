@@ -1,6 +1,7 @@
 use {
     crate::{
         AgaveHandshakeError, ClientHandshakeError, ClientLogon, ProtocolVersions,
+        SessionSetupError,
         client::{connect, connect_path},
         server::Server,
         shared::{MAX_ALLOCATOR_HANDLES, MAX_WORKERS},
@@ -11,7 +12,7 @@ use {
         ProgressMessage, SharableTransactionBatchRegion, SharableTransactionRegion,
         TpuToPackMessage,
     },
-    std::time::Duration,
+    std::{assert_matches, time::Duration},
     tempfile::NamedTempFile,
 };
 
@@ -431,12 +432,10 @@ fn local_session_rejects_invalid_worker_count() {
             allocator_handles: 1,
             ..ClientLogon::default()
         });
-        let Err(crate::SessionSetupError::Server(AgaveHandshakeError::WorkerCount(actual))) =
-            result
-        else {
-            panic!("expected WorkerCount error for {count}");
-        };
-        assert_eq!(actual, count);
+        assert_matches!(
+            result.err(),
+            Some(SessionSetupError::Server(AgaveHandshakeError::WorkerCount(actual))) if actual == count
+        );
     }
 }
 
@@ -449,12 +448,10 @@ fn local_session_rejects_invalid_check_worker_count() {
             allocator_handles: 1,
             ..ClientLogon::default()
         });
-        let Err(crate::SessionSetupError::Server(AgaveHandshakeError::CheckWorkerCount(actual))) =
-            result
-        else {
-            panic!("expected CheckWorkerCount error for {count}");
-        };
-        assert_eq!(actual, count);
+        assert_matches!(
+            result.err(),
+            Some(SessionSetupError::Server(AgaveHandshakeError::CheckWorkerCount(actual))) if actual == count
+        );
     }
 }
 
@@ -467,12 +464,10 @@ fn local_session_rejects_invalid_allocator_handles() {
             allocator_handles: count,
             ..ClientLogon::default()
         });
-        let Err(crate::SessionSetupError::Server(AgaveHandshakeError::AllocatorHandles(actual))) =
-            result
-        else {
-            panic!("expected AllocatorHandles error for {count}");
-        };
-        assert_eq!(actual, count);
+        assert_matches!(
+            result.err(),
+            Some(SessionSetupError::Server(AgaveHandshakeError::AllocatorHandles(actual))) if actual == count
+        );
     }
 }
 
@@ -485,10 +480,10 @@ fn setup_session_rejects_invalid_worker_counts() {
             allocator_handles: 1,
             ..ClientLogon::default()
         });
-        let Err(AgaveHandshakeError::WorkerCount(actual)) = result else {
-            panic!("expected WorkerCount error for {count}");
-        };
-        assert_eq!(actual, count);
+        assert_matches!(
+            result.err(),
+            Some(AgaveHandshakeError::WorkerCount(actual)) if actual == count
+        );
     }
 }
 
@@ -501,10 +496,10 @@ fn setup_session_rejects_invalid_check_worker_counts() {
             allocator_handles: 1,
             ..ClientLogon::default()
         });
-        let Err(AgaveHandshakeError::CheckWorkerCount(actual)) = result else {
-            panic!("expected CheckWorkerCount error for {count}");
-        };
-        assert_eq!(actual, count);
+        assert_matches!(
+            result.err(),
+            Some(AgaveHandshakeError::CheckWorkerCount(actual)) if actual == count
+        );
     }
 }
 
@@ -517,10 +512,10 @@ fn setup_session_rejects_invalid_allocator_handles() {
             allocator_handles: count,
             ..ClientLogon::default()
         });
-        let Err(AgaveHandshakeError::AllocatorHandles(actual)) = result else {
-            panic!("expected AllocatorHandles error for {count}");
-        };
-        assert_eq!(actual, count);
+        assert_matches!(
+            result.err(),
+            Some(AgaveHandshakeError::AllocatorHandles(actual)) if actual == count
+        );
     }
 }
 
@@ -534,12 +529,10 @@ fn local_session_rejects_unrepresentable_allocator_sizes() {
             allocator_size: size,
             ..ClientLogon::default()
         });
-        let Err(crate::SessionSetupError::Server(AgaveHandshakeError::AllocatorSize(actual))) =
-            result
-        else {
-            panic!("expected AllocatorSize error for {size}");
-        };
-        assert_eq!(actual, size);
+        assert_matches!(
+            result.err(),
+            Some(SessionSetupError::Server(AgaveHandshakeError::AllocatorSize(actual))) if actual == size
+        );
     }
 }
 
@@ -600,7 +593,7 @@ fn local_session_rejects_unrepresentable_queue_capacities() {
             ),
         ] {
             let result = crate::setup_local_session(logon);
-            let Err(crate::SessionSetupError::Server(AgaveHandshakeError::QueueCapacity {
+            let Err(SessionSetupError::Server(AgaveHandshakeError::QueueCapacity {
                 field,
                 capacity: actual,
             })) = result
@@ -634,19 +627,25 @@ fn queue_payload_size_boundary_is_checked() {
 
 #[test]
 fn file_size_rounding_is_checked() {
-    for page_size in [4096, 2 * 1024 * 1024] {
-        let huge = page_size != 4096;
-        let largest = (isize::MAX as usize / page_size) * page_size;
-        assert_eq!(crate::shared::checked_file_size(1, huge), Some(page_size));
+    for page_size in [
+        crate::shared::PageSize::Standard,
+        crate::shared::PageSize::Huge,
+    ] {
+        let bytes = page_size.bytes();
+        let largest = (crate::shared::POINTER_OFFSET_LIMIT / bytes) * bytes;
+        assert_eq!(crate::shared::checked_file_size(1, page_size), Some(bytes));
         assert_eq!(
-            crate::shared::checked_file_size(largest, huge),
+            crate::shared::checked_file_size(largest, page_size),
             Some(largest)
         );
         assert_eq!(
-            crate::shared::checked_file_size(largest.checked_add(1).unwrap(), huge),
+            crate::shared::checked_file_size(largest.checked_add(1).unwrap(), page_size),
             None
         );
-        assert_eq!(crate::shared::checked_file_size(usize::MAX, huge), None);
+        assert_eq!(
+            crate::shared::checked_file_size(usize::MAX, page_size),
+            None
+        );
     }
 }
 
