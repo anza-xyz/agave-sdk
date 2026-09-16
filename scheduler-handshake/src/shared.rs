@@ -104,9 +104,9 @@ pub struct ClientLogon {
 }
 
 impl ClientLogon {
-    /// Validates the worker counts and allocator handle count.
+    /// Validates counts and checks that allocator and queue sizes can be represented.
     ///
-    /// This does not validate the allocator size or queue capacities.
+    /// Allocation can still fail if a size is too small or resources are unavailable.
     pub fn validate(&self) -> Result<(), AgaveHandshakeError> {
         if !(1..=MAX_WORKERS).contains(&self.worker_count) {
             return Err(AgaveHandshakeError::WorkerCount(self.worker_count));
@@ -124,6 +124,46 @@ impl ClientLogon {
             ));
         }
 
+        checked_file_size(self.allocator_size, true)
+            .ok_or(AgaveHandshakeError::AllocatorSize(self.allocator_size))?;
+
+        validate_queue_capacity(
+            "tpu_to_pack_capacity",
+            self.tpu_to_pack_capacity,
+            shaq::spsc::try_minimum_file_size::<TpuToPackMessage>,
+            true,
+        )?;
+        validate_queue_capacity(
+            "progress_tracker_capacity",
+            self.progress_tracker_capacity,
+            shaq::spsc::try_minimum_file_size::<ProgressMessage>,
+            false,
+        )?;
+        validate_queue_capacity(
+            "pack_to_worker_capacity",
+            self.pack_to_worker_capacity,
+            shaq::spsc::try_minimum_file_size::<PackToExecutionWorkerMessage>,
+            true,
+        )?;
+        validate_queue_capacity(
+            "worker_to_pack_capacity",
+            self.worker_to_pack_capacity,
+            shaq::spsc::try_minimum_file_size::<ExecutionWorkerToPackMessage>,
+            true,
+        )?;
+        validate_queue_capacity(
+            "pack_to_check_worker_capacity",
+            self.pack_to_check_worker_capacity,
+            shaq::mpmc::try_minimum_file_size::<PackToCheckWorkerMessage>,
+            true,
+        )?;
+        validate_queue_capacity(
+            "check_worker_to_pack_capacity",
+            self.check_worker_to_pack_capacity,
+            shaq::mpmc::try_minimum_file_size::<CheckWorkerToPackMessage>,
+            true,
+        )?;
+
         Ok(())
     }
 
@@ -137,6 +177,25 @@ impl ClientLogon {
         // - `Self` is valid for any byte pattern
         Some(unsafe { core::ptr::read_unaligned(buffer.as_ptr().cast()) })
     }
+}
+
+fn validate_queue_capacity(
+    field: &'static str,
+    capacity: usize,
+    minimum_file_size: fn(usize) -> Result<usize, ShaqError>,
+    huge: bool,
+) -> Result<(), AgaveHandshakeError> {
+    let size = minimum_file_size(capacity)
+        .map_err(|_| AgaveHandshakeError::QueueCapacity { field, capacity })?;
+    checked_file_size(size, huge).ok_or(AgaveHandshakeError::QueueCapacity { field, capacity })?;
+    Ok(())
+}
+
+/// Rounds up to a page boundary while keeping the mapping size within pointer-offset limits.
+pub(crate) fn checked_file_size(size: usize, huge: bool) -> Option<usize> {
+    let page_size = if huge { 2 * 1024 * 1024 } else { 4096 };
+    size.checked_next_multiple_of(page_size)
+        .filter(|&size| size <= isize::MAX as usize)
 }
 
 pub mod logon_flags {}
@@ -238,6 +297,13 @@ pub enum AgaveHandshakeError {
     CheckWorkerCount(usize),
     #[error("Allocator handles; count={0}")]
     AllocatorHandles(usize),
+    #[error("Allocator size cannot be represented; size={0}")]
+    AllocatorSize(usize),
+    #[error("Queue capacity cannot be represented; field={field}, capacity={capacity}")]
+    QueueCapacity {
+        field: &'static str,
+        capacity: usize,
+    },
     #[error("Rts alloc; err={0:?}")]
     RtsAlloc(#[from] RtsAllocError),
     #[error("Shaq; err={0:?}")]

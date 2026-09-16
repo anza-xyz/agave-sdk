@@ -2,7 +2,9 @@ use {
     crate::{
         AgaveCheckWorkerSession, AgaveHandshakeError, AgaveTpuToPackSession, AgaveWorkerSession,
         ClientLogon, ProtocolVersions,
-        shared::{AgaveSession, GLOBAL_ALLOCATORS, LOGON_FAILURE, LOGON_SUCCESS},
+        shared::{
+            AgaveSession, GLOBAL_ALLOCATORS, LOGON_FAILURE, LOGON_SUCCESS, checked_file_size,
+        },
     },
     agave_scheduler_bindings::{
         CheckWorkerToPackMessage, PackToCheckWorkerMessage, PackToExecutionWorkerMessage,
@@ -227,7 +229,7 @@ impl Server {
 
         let create = |huge: bool| {
             let allocator_file = Self::create_shmem(huge)?;
-            let allocator_file_size = Self::align_file_size(logon.allocator_size, huge);
+            let allocator_file_size = Self::align_file_size(logon.allocator_size, huge)?;
 
             // SAFETY: We just created this file and thus can uniquely initialize it.
             unsafe {
@@ -251,8 +253,8 @@ impl Server {
     ) -> Result<(File, shaq::spsc::Producer<T>), ShaqError> {
         let create = |huge: bool| {
             let file = Self::create_shmem(huge)?;
-            let minimum_file_size = shaq::spsc::minimum_file_size::<T>(capacity);
-            let file_size = Self::align_file_size(minimum_file_size, huge);
+            let minimum_file_size = shaq::spsc::try_minimum_file_size::<T>(capacity)?;
+            let file_size = Self::align_file_size(minimum_file_size, huge)?;
 
             // SAFETY: uniqely creating as producer
             unsafe { shaq::spsc::Producer::create(&file, file_size) }
@@ -272,8 +274,8 @@ impl Server {
         let create = |huge: bool| {
             let file = Self::create_shmem(huge)?;
             let minimum_file_size =
-                shaq::spsc::minimum_file_size::<PackToExecutionWorkerMessage>(capacity);
-            let file_size = Self::align_file_size(minimum_file_size, huge);
+                shaq::spsc::try_minimum_file_size::<PackToExecutionWorkerMessage>(capacity)?;
+            let file_size = Self::align_file_size(minimum_file_size, huge)?;
 
             // SAFETY: uniquely creating as consumer.
             unsafe { shaq::spsc::Consumer::create(&file, file_size) }
@@ -290,8 +292,8 @@ impl Server {
     ) -> Result<(File, shaq::mpmc::Producer<T>), ShaqError> {
         let create = |huge: bool| {
             let file = Self::create_shmem(huge)?;
-            let minimum_file_size = shaq::mpmc::minimum_file_size::<T>(capacity);
-            let file_size = Self::align_file_size(minimum_file_size, huge);
+            let minimum_file_size = shaq::mpmc::try_minimum_file_size::<T>(capacity)?;
+            let file_size = Self::align_file_size(minimum_file_size, huge)?;
 
             // SAFETY: uniquely creating as producer.
             unsafe { shaq::mpmc::Producer::create(&file, file_size) }
@@ -309,8 +311,8 @@ impl Server {
     ) -> Result<(File, shaq::mpmc::Consumer<T>), ShaqError> {
         let create = |huge: bool| {
             let file = Self::create_shmem(huge)?;
-            let minimum_file_size = shaq::mpmc::minimum_file_size::<T>(capacity);
-            let file_size = Self::align_file_size(minimum_file_size, huge);
+            let minimum_file_size = shaq::mpmc::try_minimum_file_size::<T>(capacity)?;
+            let file_size = Self::align_file_size(minimum_file_size, huge)?;
 
             // SAFETY: uniquely creating as consumer.
             unsafe { shaq::mpmc::Consumer::create(&file, file_size) }
@@ -391,10 +393,12 @@ impl Server {
         }
     }
 
-    fn align_file_size(size: usize, huge: bool) -> usize {
-        match huge {
-            true => size.next_multiple_of(2 * 1024 * 1024),
-            false => size.next_multiple_of(4096),
-        }
+    fn align_file_size(size: usize, huge: bool) -> Result<usize, std::io::Error> {
+        checked_file_size(size, huge).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "file size cannot be represented",
+            )
+        })
     }
 }

@@ -525,6 +525,167 @@ fn setup_session_rejects_invalid_allocator_handles() {
 }
 
 #[test]
+fn local_session_rejects_unrepresentable_allocator_sizes() {
+    for size in [usize::MAX, isize::MAX as usize] {
+        let result = crate::setup_local_session(ClientLogon {
+            worker_count: 1,
+            check_worker_count: 1,
+            allocator_handles: 1,
+            allocator_size: size,
+            ..ClientLogon::default()
+        });
+        let Err(crate::SessionSetupError::Server(AgaveHandshakeError::AllocatorSize(actual))) =
+            result
+        else {
+            panic!("expected AllocatorSize error for {size}");
+        };
+        assert_eq!(actual, size);
+    }
+}
+
+#[test]
+fn local_session_rejects_unrepresentable_queue_capacities() {
+    let logon = ClientLogon {
+        worker_count: 1,
+        check_worker_count: 1,
+        allocator_handles: 1,
+        // An undersized allocator ensures queue validation happens before allocation.
+        allocator_size: 0,
+        ..ClientLogon::default()
+    };
+    // Exercise power-of-two rounding and multiplication overflow for every message type.
+    for capacity in [usize::MAX, 1usize << (usize::BITS - 1)] {
+        for (expected_field, logon) in [
+            (
+                "tpu_to_pack_capacity",
+                ClientLogon {
+                    tpu_to_pack_capacity: capacity,
+                    ..logon
+                },
+            ),
+            (
+                "progress_tracker_capacity",
+                ClientLogon {
+                    progress_tracker_capacity: capacity,
+                    ..logon
+                },
+            ),
+            (
+                "pack_to_worker_capacity",
+                ClientLogon {
+                    pack_to_worker_capacity: capacity,
+                    ..logon
+                },
+            ),
+            (
+                "worker_to_pack_capacity",
+                ClientLogon {
+                    worker_to_pack_capacity: capacity,
+                    ..logon
+                },
+            ),
+            (
+                "pack_to_check_worker_capacity",
+                ClientLogon {
+                    pack_to_check_worker_capacity: capacity,
+                    ..logon
+                },
+            ),
+            (
+                "check_worker_to_pack_capacity",
+                ClientLogon {
+                    check_worker_to_pack_capacity: capacity,
+                    ..logon
+                },
+            ),
+        ] {
+            let result = crate::setup_local_session(logon);
+            let Err(crate::SessionSetupError::Server(AgaveHandshakeError::QueueCapacity {
+                field,
+                capacity: actual,
+            })) = result
+            else {
+                panic!("expected QueueCapacity error for {expected_field}={capacity}");
+            };
+            assert_eq!(field, expected_field);
+            assert_eq!(actual, capacity);
+        }
+    }
+}
+
+#[test]
+fn queue_payload_size_boundary_is_checked() {
+    // The rounded payload capacity leaves no room for the header, or overflows itself.
+    let logon = ClientLogon {
+        worker_count: 1,
+        check_worker_count: 1,
+        allocator_handles: 1,
+        progress_tracker_capacity: (usize::MAX / core::mem::size_of::<ProgressMessage>())
+            .checked_next_power_of_two()
+            .unwrap(),
+        ..ClientLogon::default()
+    };
+    let Err(AgaveHandshakeError::QueueCapacity { field, capacity }) = logon.validate() else {
+        panic!("expected QueueCapacity error");
+    };
+    assert_eq!(field, "progress_tracker_capacity");
+    assert_eq!(capacity, logon.progress_tracker_capacity);
+}
+
+#[test]
+fn file_size_rounding_is_checked() {
+    for page_size in [4096, 2 * 1024 * 1024] {
+        let huge = page_size != 4096;
+        let largest = (isize::MAX as usize / page_size) * page_size;
+        assert_eq!(crate::shared::checked_file_size(1, huge), Some(page_size));
+        assert_eq!(
+            crate::shared::checked_file_size(largest, huge),
+            Some(largest)
+        );
+        assert_eq!(
+            crate::shared::checked_file_size(largest.checked_add(1).unwrap(), huge),
+            None
+        );
+        assert_eq!(crate::shared::checked_file_size(usize::MAX, huge), None);
+    }
+}
+
+#[test]
+fn reject_unrepresentable_sizes_over_socket() {
+    let logon = ClientLogon {
+        worker_count: 1,
+        check_worker_count: 1,
+        allocator_handles: 1,
+        ..ClientLogon::default()
+    };
+    for logon in [
+        ClientLogon {
+            allocator_size: usize::MAX,
+            ..logon
+        },
+        ClientLogon {
+            tpu_to_pack_capacity: usize::MAX,
+            ..logon
+        },
+    ] {
+        let ipc = NamedTempFile::new().unwrap();
+        std::fs::remove_file(ipc.path()).unwrap();
+        let mut server = Server::new(ipc.path()).unwrap();
+        let expected = logon.validate().unwrap_err().to_string();
+        let server_handle = std::thread::spawn(move || {
+            let error = server.accept().err().expect("expected setup rejection");
+            assert_eq!(error.to_string(), expected);
+        });
+        let result = connect(ipc, logon, Duration::from_secs(1));
+        let Err(ClientHandshakeError::Rejected(reason)) = result else {
+            panic!("expected rejection for an unrepresentable size");
+        };
+        assert_eq!(reason, logon.validate().unwrap_err().to_string());
+        server_handle.join().unwrap();
+    }
+}
+
+#[test]
 fn check_worker_queues_use_dedicated_capacities() {
     const CHECK_REQUEST_CAPACITY: usize = 1 << 18;
     const CHECK_RESPONSE_CAPACITY: usize = 1 << 19;

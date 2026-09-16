@@ -17,12 +17,8 @@ pub use shared::*;
 
 /// Creates both sides of a local scheduling session without a socket handshake.
 ///
-/// Validates the logon counts and initializes the shared allocator and queues. Both endpoints
+/// Validates the logon and initializes the shared allocator and queues. Both endpoints
 /// use this build's interfaces, so no protocol-version negotiation is performed.
-///
-/// # Panics
-///
-/// May panic if allocator size or queue capacity calculations overflow.
 pub fn setup_local_session(
     logon: ClientLogon,
 ) -> Result<(AgaveSession, ClientSession), SessionSetupError> {
