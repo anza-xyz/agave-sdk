@@ -114,12 +114,17 @@ fn recv_response(stream: &mut UnixStream) -> Result<Vec<File>, ClientHandshakeEr
         MsgFlags::empty(),
     )?;
 
+    if msg.bytes == 0 {
+        return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+    }
+
     // Check for failure.
     let buf = msg.iovs().next().unwrap();
     if buf[0] == LOGON_FAILURE {
         let reason_len = usize::from(buf[1]);
         #[allow(clippy::arithmetic_side_effects)]
-        let reason = std::str::from_utf8(&buf[2..2 + reason_len]).unwrap();
+        // The server may truncate the reason in the middle of a UTF-8 character.
+        let reason = String::from_utf8_lossy(&buf[2..2 + reason_len]);
 
         return Err(ClientHandshakeError::Rejected(reason.to_string()));
     }
@@ -207,5 +212,31 @@ pub fn setup_session(
 impl From<nix::Error> for ClientHandshakeError {
     fn from(value: nix::Error) -> Self {
         Self::Io(value.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn response_eof_returns_error() {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        drop(server);
+        let Err(ClientHandshakeError::Io(error)) = recv_response(&mut client) else {
+            panic!("expected EOF error");
+        };
+        assert_eq!(error.kind(), std::io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn rejection_with_truncated_utf8_returns_error() {
+        let (mut client, mut server) = UnixStream::pair().unwrap();
+        // The first byte of a two-byte UTF-8 character, as if truncated by the server.
+        server.write_all(&[LOGON_FAILURE, 1, 0xc3]).unwrap();
+        let Err(ClientHandshakeError::Rejected(reason)) = recv_response(&mut client) else {
+            panic!("expected rejection");
+        };
+        assert_eq!(reason, "\u{fffd}");
     }
 }
