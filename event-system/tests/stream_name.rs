@@ -21,7 +21,7 @@ use {
 #[case::tab("stream\tname")]
 #[case::newline("stream\nname")]
 #[case::policy_separator("stream,other")]
-#[case::policy_assignment("stream=allow")]
+#[case::policy_assignment("stream=on")]
 #[case::backslash("stream\\name")]
 #[case::underscore_with_slash("stream_/name")]
 #[case::emoji("🦀")]

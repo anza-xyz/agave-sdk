@@ -6,6 +6,7 @@ use {
             StreamConfig,
         },
         stream_name::StreamName,
+        stream_policy::StreamPolicy,
     },
     shaq::broadcast::{Broadcast, BroadcastConfig, ProducerId},
     std::{
@@ -16,8 +17,9 @@ use {
             unix::fs::symlink,
         },
         path::{Path, PathBuf},
-        sync::Arc,
+        sync::{Arc, Mutex},
     },
+    stream_policy::{AtomicStreamRule, StreamPolicyManager},
 };
 pub(crate) use {
     producer::Producer,
@@ -28,6 +30,8 @@ pub(crate) use {
 
 #[path = "linux/producer.rs"]
 mod producer;
+#[path = "linux/stream_policy.rs"]
+mod stream_policy;
 #[path = "linux/subscriber.rs"]
 mod subscriber;
 
@@ -61,6 +65,7 @@ pub(crate) type EventQueueError = shaq::error::Error;
 #[derive(Debug, Clone)]
 pub(crate) struct EventSystem {
     event_system_directory: Arc<Path>,
+    stream_policy_manager: Arc<Mutex<StreamPolicyManager>>,
 }
 
 impl EventSystem {
@@ -80,6 +85,7 @@ impl EventSystem {
 
         Ok(Self {
             event_system_directory: event_system_directory.into(),
+            stream_policy_manager: Arc::new(Mutex::new(StreamPolicyManager::default())),
         })
     }
 
@@ -128,12 +134,29 @@ impl EventSystem {
         symlink(proc_fd_path, queue_file_path)?;
 
         temporary_event_stream_directory.publish(&event_stream_directory)?;
-        let stream_guard = StreamGuard {
-            event_stream_directory: event_stream_directory.into(),
-            _queue_file: queue_file,
-        };
 
-        Ok(ProducerFactory::new(broadcast, stream_guard))
+        let stream_guard = Arc::new(StreamGuard {
+            event_stream_directory: event_stream_directory.into(),
+            stream_name: Arc::new(stream_name),
+            _queue_file: queue_file,
+        });
+
+        let mut stream_policy_manager_guard = self.stream_policy_manager.lock().unwrap();
+        let atomic_stream_rule = stream_policy_manager_guard.register_new_stream(&stream_guard);
+        drop(stream_policy_manager_guard);
+
+        Ok(ProducerFactory::new(
+            broadcast,
+            stream_guard,
+            atomic_stream_rule,
+        ))
+    }
+
+    pub(crate) fn set_stream_policy(&self, new_stream_policy: StreamPolicy) {
+        self.stream_policy_manager
+            .lock()
+            .unwrap()
+            .set_stream_policy(new_stream_policy);
     }
 }
 
@@ -189,6 +212,7 @@ fn create_sealed_queue<E: Event>(
 pub(crate) struct ProducerFactory<E: Event> {
     broadcast: Broadcast<E::QueueCell>,
     stream_guard: Arc<StreamGuard>,
+    stream_rule: Arc<AtomicStreamRule>,
 }
 
 impl<E: Event> ProducerFactory<E> {
@@ -204,15 +228,20 @@ impl<E: Event> ProducerFactory<E> {
         let producer_id = ProducerId::new(thread_id);
         let broadcast_sender = self.broadcast.producer(producer_id).ok()?;
 
-        let producer = Producer::new(broadcast_sender, stream_guard);
+        let producer = Producer::new(broadcast_sender, stream_guard, self.stream_rule.clone());
 
         Some(producer)
     }
 
-    fn new(broadcast: Broadcast<E::QueueCell>, stream_guard: StreamGuard) -> Self {
+    fn new(
+        broadcast: Broadcast<E::QueueCell>,
+        stream_guard: Arc<StreamGuard>,
+        stream_rule: Arc<AtomicStreamRule>,
+    ) -> Self {
         Self {
             broadcast,
-            stream_guard: Arc::new(stream_guard),
+            stream_guard,
+            stream_rule,
         }
     }
 }
@@ -222,6 +251,7 @@ impl<E: Event> Clone for ProducerFactory<E> {
         Self {
             broadcast: self.broadcast.clone(),
             stream_guard: self.stream_guard.clone(),
+            stream_rule: self.stream_rule.clone(),
         }
     }
 }
@@ -239,6 +269,7 @@ impl<E: Event> std::fmt::Debug for ProducerFactory<E> {
 #[derive(Debug)]
 struct StreamGuard {
     event_stream_directory: Box<Path>,
+    stream_name: Arc<StreamName>,
     // keeps the anonymous file alive
     _queue_file: File,
 }

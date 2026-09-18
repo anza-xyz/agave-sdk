@@ -4,6 +4,7 @@ use {
         event_system::{CreateEventSystemError, CreateStreamError, StreamConfig},
         producer::EmitEventError,
         stream_name::StreamName,
+        stream_policy::StreamPolicy,
         subscriber::{TryConnectError, TryRecvError},
     },
     std::{
@@ -55,6 +56,8 @@ impl EventSystem {
     ) -> Result<ProducerFactory<E>, CreateStreamError> {
         Ok(ProducerFactory::new())
     }
+
+    pub(crate) fn set_stream_policy(&self, _new_stream_policy: StreamPolicy) {}
 }
 
 pub(crate) struct ProducerFactory<E: Event> {

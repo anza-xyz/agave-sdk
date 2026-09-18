@@ -1,5 +1,9 @@
 use {
-    crate::{Event, backend::StreamGuard, producer::EmitEventError},
+    crate::{
+        Event,
+        backend::{AtomicStreamRule, StreamGuard},
+        producer::EmitEventError,
+    },
     std::{fmt::Debug, num::NonZeroUsize, sync::Arc},
 };
 
@@ -7,10 +11,15 @@ use {
 pub(crate) struct Producer<E: Event> {
     broadcast_sender: shaq::broadcast::Producer<E::QueueCell>,
     stream_guard: Arc<StreamGuard>,
+    stream_rule: Arc<AtomicStreamRule>,
 }
 
 impl<E: Event> Producer<E> {
     pub(crate) fn emit_event(&mut self, event: &E) -> Result<(), EmitEventError> {
+        if !self.stream_rule.is_on() {
+            return Ok(());
+        }
+
         // SAFETY: write_guard is initialized below before it is dropped by going out of scope.
         let mut write_guard = unsafe { self.broadcast_sender.try_reserve_write() }
             .ok_or(EmitEventError::FailedToSend)?;
@@ -34,6 +43,10 @@ impl<E: Event> Producer<E> {
     ///
     /// The events previous to the failing event are all sent.
     pub(crate) fn emit_events_batched(&mut self, events: &[E]) -> Result<(), EmitEventError> {
+        if !self.stream_rule.is_on() {
+            return Ok(());
+        }
+
         let Ok(event_count) = NonZeroUsize::try_from(events.len()) else {
             // nothing to write
             return Ok(());
@@ -62,10 +75,12 @@ impl<E: Event> Producer<E> {
     pub(super) fn new(
         broadcast_sender: shaq::broadcast::Producer<E::QueueCell>,
         stream_guard: Arc<StreamGuard>,
+        stream_rule: Arc<AtomicStreamRule>,
     ) -> Self {
         Self {
             broadcast_sender,
             stream_guard,
+            stream_rule,
         }
     }
 }

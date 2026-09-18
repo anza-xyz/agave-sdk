@@ -134,6 +134,6 @@ pub enum StreamNameValidationError {
     Empty,
     #[error("stream name must not be `.` or `..`")]
     ReservedDirectoryName,
-    #[error("validation of stream name failed due to the disallowed character in the name.")]
+    #[error("validation of stream name failed due to a disallowed character in the name.")]
     InvalidCharacter,
 }

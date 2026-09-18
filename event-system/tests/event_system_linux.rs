@@ -1,58 +1,22 @@
 #![cfg(target_os = "linux")]
 
+mod common;
+
 use {
+    crate::common::TestContextBuilder,
     agave_event_system::{
-        CreateStreamError, Event, EventSystem, ProducerFactory, StreamConfig, event,
+        CreateStreamError, Event, EventSystem, ProducerFactory, StreamConfig,
         stream_name::StreamName,
         subscriber::{
             self, AvailableStream, DecodedMessage, TryConnectError, TryConnectTypedError,
         },
     },
+    common::{TEST_CONFIG, TEST_STREAM_NAME, TestEnumEvent, TestEvent},
     rstest::rstest,
-    std::{assert_matches, io::ErrorKind, path::PathBuf},
+    std::{assert_matches, io::ErrorKind},
     tempfile::TempDir,
     wincode_dynamic::Value,
 };
-
-#[event]
-#[derive(Debug, PartialEq, PartialOrd)]
-struct TestEvent {
-    value: u64,
-}
-
-#[event]
-enum TestEnumEvent {
-    Value { value: u64 },
-}
-
-const TEST_CONFIG: StreamConfig = StreamConfig {
-    capacity: 2,
-    producer_slots: 1,
-    consumer_slots: 1,
-};
-
-struct TestContext {
-    event_system: EventSystem,
-    directory: TempDir,
-}
-
-impl TestContext {
-    fn new_event_system() -> Self {
-        let directory = TempDir::new().unwrap();
-        let event_system = EventSystem::new(directory.path()).unwrap();
-
-        Self {
-            event_system,
-            directory,
-        }
-    }
-
-    fn event_system_path(&self) -> PathBuf {
-        self.directory.path().to_path_buf()
-    }
-}
-
-const TEST_STREAM_NAME: StreamName = agave_event_system::stream_name!("test-stream");
 
 #[test]
 fn create_event_system_fails_when_path_is_a_file() {
@@ -81,7 +45,9 @@ fn create_event_system_fails_when_directory_is_reused() {
 
 #[test]
 fn create_stream_reserves_names_only_after_success() {
-    let test_context = TestContext::new_event_system();
+    let test_context = TestContextBuilder::new()
+        .with_policy_enabling_all_streams()
+        .build();
     const REUSED_STREAM_NAME: StreamName = agave_event_system::stream_name!("reused-stream-name");
 
     let invalid_config = StreamConfig {
@@ -141,7 +107,10 @@ fn stream_can_be_recreated_after_dropping_all_handles() {
 
 #[rstest]
 fn producer_creation_respects_slot_limit(#[values(1, 2, 4)] producer_slots: usize) {
-    let test_context = TestContext::new_event_system();
+    let test_context = TestContextBuilder::new()
+        .with_policy_enabling_all_streams()
+        .build();
+
     let stream_config = StreamConfig {
         producer_slots,
         ..TEST_CONFIG
@@ -169,7 +138,9 @@ fn producer_creation_respects_slot_limit(#[values(1, 2, 4)] producer_slots: usiz
 fn typed_subscribers_can_connect_and_receive_events(#[values(1, 2)] consumer_slots: usize) {
     const TEST_EVENT: TestEvent = TestEvent { value: 42 };
 
-    let test_context = TestContext::new_event_system();
+    let test_context = TestContextBuilder::new()
+        .with_policy_enabling_all_streams()
+        .build();
     let stream_config = StreamConfig {
         consumer_slots,
         ..TEST_CONFIG
@@ -216,7 +187,9 @@ fn dynamic_subscriber_can_connect_and_decode_events<E: Event>(
     #[case] event: E,
     #[case] expected_variant_name: Option<&str>,
 ) {
-    let test_context = TestContext::new_event_system();
+    let test_context = TestContextBuilder::new()
+        .with_policy_enabling_all_streams()
+        .build();
     let producer_factory: ProducerFactory<E> = test_context
         .event_system
         .create_stream(TEST_STREAM_NAME, TEST_CONFIG)

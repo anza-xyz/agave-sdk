@@ -223,7 +223,7 @@ impl AvailableStream {
 
 /// Errors that can arise when trying to receive an event on a specific event stream
 /// through a subscriber.
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum TryRecvError {
     #[error("the stream has no new message")]
     Empty,
