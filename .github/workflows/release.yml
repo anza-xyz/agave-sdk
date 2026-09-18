@@ -8,6 +8,7 @@ on:
         required: true
         type: choice
         options:
+          - agave-geyser-plugin-interface
           - agave-transaction-view
           - agave-scheduler-bindings
           - agave-scheduler-handshake

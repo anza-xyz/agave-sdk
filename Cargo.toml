@@ -2,6 +2,7 @@
 members = [
     "event-system",
     "event-system-derive",
+    "geyser-plugin-interface",
     "scheduler-bindings",
     "scheduler-handshake",
     "transaction-view",
@@ -38,6 +39,7 @@ bytes = "1.12.1"
 criterion = "0.8.2"
 getrandom = "0.4.3"
 libc = "0.2.189"
+log = "0.4.34"
 nix = "0.31.3"
 proc-macro-crate = "3.5.0"
 proc-macro2 = "1.0.106"
@@ -45,19 +47,23 @@ quote = "1.0.46"
 rstest = "0.27.0"
 rts-alloc = "5.1.0"
 shaq = "4.4.0"
+solana-bls-signatures = { version = "4.0.0", features = ["serde"] }
+solana-clock = "4.0.0"
 solana-hash = "4.6.0"
 solana-instruction = "4.0.0"
 solana-keypair = "4.0.0"
 solana-message = "5.0.0"
 solana-packet = "4.3.0"
 solana-pubkey = { version = "4.3.0", default-features = false }
+solana-reward-info = "7.0.0"
 solana-sdk-ids = "3.1.0"
 solana-short-vec = "3.3.0"
-solana-signature = { version = "3.5.1", default-features = false }
+solana-signature = { version = "3.5.2", default-features = false }
 solana-signer = "4.0.0"
 solana-svm-transaction = "6.0.0"
 solana-system-interface = { version = "3.3", features = ["alloc", "wincode"] }
 solana-transaction = "5.0.0"
+solana-transaction-error = "4.0.0"
 syn = "3.0.4"
 tempfile = "3.27.0"
 thiserror = "2.0.20"
