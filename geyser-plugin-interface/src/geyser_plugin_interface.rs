@@ -839,6 +839,16 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
         false
     }
 
+    /// Suppress contact info republishes when only the wallclock has changed.
+    /// Defaults to true. Return false to receive every accepted republish, so
+    /// downstream subscribers can discover nodes whose contact info is unchanged.
+    ///
+    /// Only consulted when `contact_info_notifications_enabled()` returns true.
+    /// Startup notifications and removal events are unaffected.
+    fn contact_info_dedup_enabled(&self) -> bool {
+        true
+    }
+
     /// Called when a transaction is deshredded (entries formed from shreds).
     /// This is triggered before any execution occurs. Unlike notify_transaction,
     /// this does not include execution metadata (TransactionStatusMeta).
