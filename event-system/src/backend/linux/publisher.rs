@@ -1,7 +1,7 @@
 use {
     crate::{
         Event,
-        backend::{AtomicStreamRule, StreamGuard},
+        backend::linux::{AtomicStreamRule, StreamGuard},
         publisher::PublishError,
     },
     std::{fmt::Debug, num::NonZeroUsize, sync::Arc},
