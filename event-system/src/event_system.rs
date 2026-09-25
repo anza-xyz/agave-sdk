@@ -12,7 +12,13 @@ use {
 /// Owns an event-system directory and creates typed event streams within it.
 #[derive(Clone)]
 pub struct EventSystem {
-    backend: backend::EventSystem,
+    backend: Backend,
+}
+
+#[derive(Clone)]
+enum Backend {
+    Platform(backend::EventSystem),
+    Stub(backend::stub::EventSystem),
 }
 
 impl EventSystem {
@@ -24,8 +30,19 @@ impl EventSystem {
     /// - The given path is canonicalized.
     pub fn new(event_system_directory: impl AsRef<Path>) -> Result<Self, CreateEventSystemError> {
         Ok(Self {
-            backend: backend::EventSystem::new(event_system_directory)?,
+            backend: Backend::Platform(backend::EventSystem::new(event_system_directory)?),
         })
+    }
+
+    /// Creates a no-op event system on any platform, including Linux.
+    ///
+    /// No filesystem access is performed. Streams ignore their configuration
+    /// and policy, and their factories always return publishers that discard
+    /// events without serializing them.
+    pub fn stub() -> Self {
+        Self {
+            backend: Backend::Stub(backend::stub::EventSystem),
+        }
     }
 
     /// Creates a stream named `stream_name` for event type `E`
@@ -35,9 +52,14 @@ impl EventSystem {
         stream_name: StreamName,
         stream_config: StreamConfig,
     ) -> Result<PublisherFactory<E>, CreateStreamError> {
-        self.backend
-            .create_stream::<E>(stream_name, stream_config)
-            .map(PublisherFactory::new)
+        match &self.backend {
+            Backend::Platform(backend) => backend
+                .create_stream::<E>(stream_name, stream_config)
+                .map(PublisherFactory::new),
+            Backend::Stub(backend) => backend
+                .create_stream::<E>(stream_name, stream_config)
+                .map(PublisherFactory::stub),
+        }
     }
 
     /// Applies the given [`StreamPolicy`] on the streams created by this
@@ -46,13 +68,19 @@ impl EventSystem {
     /// The applied stream policy will also be applied to future stream creations
     /// of this event system.
     pub fn set_stream_policy(&self, stream_policy: StreamPolicy) {
-        self.backend.set_stream_policy(stream_policy)
+        match &self.backend {
+            Backend::Platform(backend) => backend.set_stream_policy(stream_policy),
+            Backend::Stub(backend) => backend.set_stream_policy(stream_policy),
+        }
     }
 }
 
 impl std::fmt::Debug for EventSystem {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.backend.fmt(formatter)
+        match &self.backend {
+            Backend::Platform(backend) => backend.fmt(formatter),
+            Backend::Stub(backend) => backend.fmt(formatter),
+        }
     }
 }
 

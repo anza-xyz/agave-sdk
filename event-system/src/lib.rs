@@ -3,6 +3,8 @@
 //!
 //! On all other targets, the public API is available but all operations are
 //! no-ops.
+//!
+//! [`EventSystem::stub()`] explicitly creates a no-op event system on any target.
 
 // This is needed to use the `#[event]` macro in order to resolve the [`Event`] trait.
 // The reason is that the macro expands to use [`agave_event_system::Event`],
@@ -42,8 +44,6 @@ pub mod __private {
     }
 }
 
-#[cfg_attr(target_os = "linux", path = "backend/linux.rs")]
-#[cfg_attr(not(target_os = "linux"), path = "backend/stub.rs")]
 mod backend;
 #[cfg(target_os = "linux")] // cache_padded is only used by linux backend as of now
 pub(crate) mod cache_padded;
