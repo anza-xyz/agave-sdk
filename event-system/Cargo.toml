@@ -24,7 +24,7 @@ wincode-dynamic = { workspace = true, features = ["derive"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 getrandom = { workspace = true, features = ["std"] }
 libc = { workspace = true }
-nix = { workspace = true, features = ["dir"] }
+nix = { workspace = true, features = ["dir", "time"] }
 shaq = { workspace = true }
 
 [dev-dependencies]
