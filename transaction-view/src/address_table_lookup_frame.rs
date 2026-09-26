@@ -49,16 +49,16 @@ const MIN_SIZED_PACKET_WITH_ATLS: usize = {
 const MAX_ATLS_PER_PACKET: u8 =
     ((PACKET_DATA_SIZE - MIN_SIZED_PACKET_WITH_ATLS) / MIN_SIZED_ATL) as u8;
 
-/// Contains metadata about the address table lookups in a transaction packet.
+/// Contains metadata about the address table lookups in a message.
 #[derive(Debug, Clone)]
 pub(crate) struct AddressTableLookupFrame {
-    /// The number of address table lookups in the transaction.
+    /// The number of address table lookups in the message.
     pub(crate) num_address_table_lookups: u8,
-    /// The offset to the first address table lookup in the transaction.
+    /// The offset to the first address table lookup in the message.
     pub(crate) offset: u16,
-    /// The total number of writable lookup accounts in the transaction.
+    /// The total number of writable lookup accounts in the message.
     pub(crate) total_writable_lookup_accounts: u16,
-    /// The total number of readonly lookup accounts in the transaction.
+    /// The total number of readonly lookup accounts in the message.
     pub(crate) total_readonly_lookup_accounts: u16,
 }
 

@@ -5,7 +5,7 @@ use crate::{
 
 /// Metadata for accessing the tx-v1 transaction config section.
 ///
-/// This frame is a permanent part of `TransactionFrame`, but it is only
+/// This frame is a permanent part of `MessageFrame`, but it is only
 /// applicable to tx-v1. For legacy and v0 transactions, use
 /// `TransactionConfigFrame::not_applicable()`.
 ///
@@ -31,9 +31,6 @@ pub(crate) struct TransactionConfigFrame {
     ///
     /// `0` means "not applicable" (legacy/v0)
     pub(crate) values_offset: u16,
-
-    /// Number of 4-byte words in ConfigValues.
-    pub(crate) num_values: u8,
 }
 
 #[allow(dead_code)]
@@ -48,8 +45,13 @@ impl TransactionConfigFrame {
             mask_offset: 0,
             mask: 0,
             values_offset: 0,
-            num_values: 0,
         }
+    }
+
+    /// Number of 4-byte words in ConfigValues.
+    #[inline(always)]
+    pub(crate) const fn num_values(&self) -> u8 {
+        self.mask.count_ones() as u8
     }
 
     /// Returns true if this frame represents a tx-v1 transaction config.
@@ -83,7 +85,6 @@ impl TransactionConfigFrame {
             mask_offset,
             mask,
             values_offset,
-            num_values,
         })
     }
 
@@ -236,7 +237,7 @@ mod tests {
         assert!(frame.is_present());
         assert_eq!(frame.mask_offset, 5);
         assert_eq!(frame.mask, 0);
-        assert_eq!(frame.num_values, 0);
+        assert_eq!(frame.num_values(), 0);
         assert_eq!(offset, 9);
     }
 
@@ -352,7 +353,7 @@ mod tests {
             .inspect(|_| assert_eq!(offset, bytes.len()))
             .unwrap();
         assert!(frame.is_present());
-        assert_eq!(frame.num_values, 2);
+        assert_eq!(frame.num_values(), 2);
 
         let view = TransactionConfigView {
             transaction_config_frame: &frame,
@@ -391,7 +392,7 @@ mod tests {
             .inspect(|_| assert_eq!(offset, bytes.len()))
             .unwrap();
         assert!(frame.is_present());
-        assert_eq!(frame.num_values, 5);
+        assert_eq!(frame.num_values(), 5);
 
         let view = TransactionConfigView {
             transaction_config_frame: &frame,

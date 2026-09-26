@@ -18,6 +18,13 @@ pub fn check_remaining(bytes: &[u8], offset: usize, num_bytes: usize) -> Result<
     }
 }
 
+/// Convert `offset` into a `u16` offset for storage in a frame.
+/// Returns Err if the offset does not fit in a `u16`.
+#[inline(always)]
+pub fn checked_offset(offset: usize) -> Result<u16> {
+    u16::try_from(offset).map_err(|_| TransactionViewError::ParseError)
+}
+
 /// Check that the buffer has at least 1 byte remaining starting at `offset`.
 /// Returns Err if the buffer is too short.
 #[inline(always)]
