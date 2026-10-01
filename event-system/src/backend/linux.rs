@@ -10,7 +10,7 @@ use {
     },
     shaq::broadcast::{Broadcast, BroadcastConfig, ProducerId},
     std::{
-        fs::{File, OpenOptions, create_dir, create_dir_all, remove_dir_all},
+        fs::{File, OpenOptions, create_dir, create_dir_all, remove_dir, remove_dir_all},
         io::{self, Write},
         os::{
             fd::{AsRawFd, FromRawFd},
@@ -36,6 +36,7 @@ mod subscriber;
 // Layout of the event-system directory:
 //
 // event-system-directory/
+// ├── lock
 // ├── tmp/
 // │   └── transaction-events/
 // │       ├── queue-<id>
@@ -53,6 +54,9 @@ const SCHEMA_FILE_NAME: &str = "schema";
 
 const STAGING_DIRECTORY_NAME: &str = "tmp";
 const STREAMS_DIRECTORY_NAME: &str = "event-streams";
+// Locked for the lifetime of an event system, so a directory left behind by an
+// exited process can be told apart from one in use.
+const LOCK_FILE_NAME: &str = "lock";
 
 // Seals required by shaq's safety contract to prevent the file from resizing.
 const REQUIRED_SEALS: libc::c_int = libc::F_SEAL_SHRINK | libc::F_SEAL_GROW | libc::F_SEAL_SEAL;
@@ -62,7 +66,7 @@ pub(crate) type EventQueueError = shaq::error::Error;
 
 #[derive(Debug, Clone)]
 pub(crate) struct EventSystem {
-    event_system_directory: Arc<Path>,
+    event_system_directory: Arc<EventSystemDirectory>,
     stream_policy_manager: Arc<Mutex<StreamPolicyManager>>,
 }
 
@@ -70,19 +74,20 @@ impl EventSystem {
     /// Creates an event system directory in the given path, `event_system_directory`.
     ///
     /// ### Note:
-    /// - If the directory path already exists, it must be empty.
+    /// - If the directory path already exists, it must be empty, or contain
+    ///   only the layout of an event system whose process has exited, which
+    ///   is then removed.
     /// - This functions creates the given directory and any missing parents.
     /// - The given path is canonicalized.
+    /// - The directory is emptied once this [`EventSystem`], its clones, and
+    ///   all of its streams are dropped. The directory itself is left in place.
     pub(crate) fn new(
         event_system_directory: impl AsRef<Path>,
     ) -> Result<Self, CreateEventSystemError> {
-        create_dir_all(&event_system_directory)?;
-        let event_system_directory = event_system_directory.as_ref().canonicalize()?;
-        create_dir(event_system_directory.join(STAGING_DIRECTORY_NAME))?;
-        create_dir(event_system_directory.join(STREAMS_DIRECTORY_NAME))?;
+        let event_system_directory = EventSystemDirectory::create(event_system_directory.as_ref())?;
 
         Ok(Self {
-            event_system_directory: event_system_directory.into(),
+            event_system_directory: Arc::new(event_system_directory),
             stream_policy_manager: Arc::new(Mutex::new(StreamPolicyManager::default())),
         })
     }
@@ -96,11 +101,13 @@ impl EventSystem {
     ) -> Result<PublisherFactory<E>, CreateStreamError> {
         let event_stream_directory = self
             .event_system_directory
+            .path
             .join(STREAMS_DIRECTORY_NAME)
             .join(stream_name.as_str());
 
         let staging_directory = self
             .event_system_directory
+            .path
             .join(STAGING_DIRECTORY_NAME)
             .join(stream_name.as_str());
 
@@ -137,6 +144,7 @@ impl EventSystem {
             event_stream_directory: event_stream_directory.into(),
             stream_name: Arc::new(stream_name),
             _queue_file: queue_file,
+            _event_system_directory: Arc::clone(&self.event_system_directory),
         });
 
         let mut stream_policy_manager_guard = self.stream_policy_manager.lock().unwrap();
@@ -270,12 +278,171 @@ struct StreamGuard {
     stream_name: Arc<StreamName>,
     // keeps the anonymous file alive
     _queue_file: File,
+    // keeps the event-system directory alive until the stream directory is removed
+    _event_system_directory: Arc<EventSystemDirectory>,
 }
 
 impl Drop for StreamGuard {
     fn drop(&mut self) {
         let _ = remove_dir_all(&self.event_stream_directory);
     }
+}
+
+/// The root of an event system's directory layout.
+///
+/// Shared by the [`EventSystem`] and its streams, so the layout is removed
+/// only after the last of them is dropped. The root directory is left in
+/// place, since it may have been set up by the caller (e.g. with permissions
+/// for subscribers), and an empty directory can be reused by
+/// [`EventSystem::new`].
+#[derive(Debug)]
+struct EventSystemDirectory {
+    path: Box<Path>,
+    /// Holds the lock on [`LOCK_FILE_NAME`]. The kernel releases it when the
+    /// process exits, even if it crashes.
+    _lock_file: File,
+}
+
+impl EventSystemDirectory {
+    fn create(path: &Path) -> io::Result<Self> {
+        create_dir_all(path)?;
+        let path = path.canonicalize()?;
+        // Checked before creating the lock file, so that a directory which is
+        // not an event system is left untouched.
+        check_layout_entries(&path)?;
+        let lock_file = lock(&path.join(LOCK_FILE_NAME))?;
+        remove_stale_layout(&path)?;
+        create_dir(path.join(STAGING_DIRECTORY_NAME))?;
+        if let Err(error) = create_dir(path.join(STREAMS_DIRECTORY_NAME)) {
+            let _ = remove_dir(path.join(STAGING_DIRECTORY_NAME));
+            return Err(error);
+        }
+        Ok(Self {
+            path: path.into(),
+            _lock_file: lock_file,
+        })
+    }
+}
+
+impl Drop for EventSystemDirectory {
+    fn drop(&mut self) {
+        // Every stream has removed its own directory by now, so these are
+        // expected to be empty. Both were created by `create`, so anything
+        // left in them is removed too, so that a later `create` can succeed.
+        let _ = remove_dir_all(self.path.join(STAGING_DIRECTORY_NAME));
+        let _ = remove_dir_all(self.path.join(STREAMS_DIRECTORY_NAME));
+        // Removed while still locked, so no other event system can have
+        // claimed the directory in the meantime.
+        let _ = std::fs::remove_file(self.path.join(LOCK_FILE_NAME));
+    }
+}
+
+/// Takes the lock on the event-system directory, creating the lock file if needed.
+fn lock(lock_file_path: &Path) -> io::Result<File> {
+    let lock_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(lock_file_path)?;
+    match lock_file.try_lock() {
+        Ok(()) => Ok(lock_file),
+        Err(std::fs::TryLockError::WouldBlock) => Err(io::Error::new(
+            io::ErrorKind::ResourceBusy,
+            format!(
+                "{} is in use by another event system",
+                lock_file_path.display()
+            ),
+        )),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
+/// Returns the subdirectories of an event-system directory, or an error if it
+/// contains anything that is not part of the event-system layout.
+fn check_layout_entries(path: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut layout_directories = Vec::new();
+    for entry in std::fs::read_dir(path)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let file_type = entry.file_type()?;
+        if name == LOCK_FILE_NAME && file_type.is_file() {
+            continue;
+        }
+        if !(name == STAGING_DIRECTORY_NAME || name == STREAMS_DIRECTORY_NAME)
+            || !file_type.is_dir()
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::DirectoryNotEmpty,
+                format!(
+                    "{} is not an event-system directory: unexpected entry {:?}",
+                    path.display(),
+                    name,
+                ),
+            ));
+        }
+        layout_directories.push(entry.path());
+    }
+    Ok(layout_directories)
+}
+
+/// Removes the layout left behind by an event system whose process exited
+/// without dropping it, e.g. after a crash.
+///
+/// Must be called while holding the directory's lock. The layout is only
+/// removed if it contains nothing unexpected, and none of its queues belong
+/// to a live process. Otherwise, it is left untouched and an error is returned.
+fn remove_stale_layout(path: &Path) -> io::Result<()> {
+    let layout_directories = check_layout_entries(path)?;
+    for layout_directory in &layout_directories {
+        for stream_directory in std::fs::read_dir(layout_directory)? {
+            check_stream_directory_is_stale(&stream_directory?.path())?;
+        }
+    }
+
+    for layout_directory in layout_directories {
+        remove_dir_all(layout_directory)?;
+    }
+    Ok(())
+}
+
+/// Checks that a stream directory only contains a schema and queue links,
+/// and that every queue link points to a file descriptor that no longer exists.
+fn check_stream_directory_is_stale(stream_directory: &Path) -> io::Result<()> {
+    let unexpected_entry = |name: &std::ffi::OsStr| {
+        io::Error::new(
+            io::ErrorKind::DirectoryNotEmpty,
+            format!(
+                "{} is not an event-stream directory: unexpected entry {:?}",
+                stream_directory.display(),
+                name,
+            ),
+        )
+    };
+
+    for entry in std::fs::read_dir(stream_directory)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let file_type = entry.file_type()?;
+        if name == SCHEMA_FILE_NAME && file_type.is_file() {
+            continue;
+        }
+        let is_queue_name = name
+            .to_str()
+            .is_some_and(|name| name.starts_with(QUEUE_FILE_NAME_PREFIX));
+        if !(is_queue_name && file_type.is_symlink()) {
+            return Err(unexpected_entry(&name));
+        }
+        // Queue links point to `/proc/<pid>/fd/<fd>`, which only resolves while
+        // the publishing process keeps the queue open.
+        if entry.path().try_exists()? {
+            return Err(io::Error::new(
+                io::ErrorKind::ResourceBusy,
+                format!("{} is in use by a live process", entry.path().display()),
+            ));
+        }
+    }
+    Ok(())
 }
 
 struct StagingDirectory {

@@ -33,14 +33,111 @@ fn create_event_system_fails_when_path_is_a_file() {
 }
 
 #[test]
-fn create_event_system_fails_when_directory_is_reused() {
+fn create_event_system_reuses_directory_only_after_drop() {
     let directory = TempDir::new().unwrap();
     let path = directory.path();
 
-    let _event_system = EventSystem::new(path).unwrap();
+    let event_system = EventSystem::new(path).unwrap();
 
     let event_system_with_reused_path_result = EventSystem::new(path);
     assert_matches!(event_system_with_reused_path_result, Err(_));
+
+    drop(event_system);
+    let _event_system =
+        EventSystem::new(path).expect("the path can be reused after the event system is dropped");
+}
+
+fn io_error_kind(error: &agave_event_system::CreateEventSystemError) -> ErrorKind {
+    std::error::Error::source(error)
+        .and_then(|source| source.downcast_ref::<std::io::Error>())
+        .expect("CreateEventSystemError wraps an io::Error")
+        .kind()
+}
+
+/// Lays out a stream directory as an event system whose process has exited
+/// would leave it, with a queue link to a file descriptor that no longer exists.
+fn write_stale_stream(path: &std::path::Path, layout_directory: &str, stream_name: &str) {
+    let stream_directory = path.join(layout_directory).join(stream_name);
+    std::fs::create_dir_all(&stream_directory).unwrap();
+    std::fs::write(stream_directory.join("schema"), b"schema").unwrap();
+    std::os::unix::fs::symlink(
+        "/proc/self/fd/does-not-exist",
+        stream_directory.join("queue-1"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn create_event_system_removes_layout_left_by_exited_process() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path();
+    std::fs::write(path.join("lock"), b"").unwrap();
+    write_stale_stream(path, "event-streams", TEST_STREAM_NAME.as_str());
+    write_stale_stream(path, "tmp", "staged-stream");
+
+    let event_system = EventSystem::new(path).expect("stale layout is removed");
+    assert_eq!(
+        std::fs::read_dir(path.join("event-streams"))
+            .unwrap()
+            .count(),
+        0
+    );
+    assert_eq!(std::fs::read_dir(path.join("tmp")).unwrap().count(), 0);
+
+    let _publisher_factory = event_system
+        .create_stream::<TestEvent>(TEST_STREAM_NAME, TEST_CONFIG)
+        .expect("the stale stream name can be reused");
+}
+
+#[test]
+fn create_event_system_fails_when_directory_is_in_use() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path();
+    let event_system = EventSystem::new(path).unwrap();
+    let _publisher_factory = event_system
+        .create_stream::<TestEvent>(TEST_STREAM_NAME, TEST_CONFIG)
+        .unwrap();
+
+    let error = EventSystem::new(path).unwrap_err();
+    assert_eq!(io_error_kind(&error), ErrorKind::ResourceBusy);
+    assert!(
+        path.join("event-streams")
+            .join(TEST_STREAM_NAME.as_str())
+            .is_dir()
+    );
+}
+
+#[test]
+fn create_event_system_fails_when_a_queue_is_still_open() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path();
+    let stream_directory = path.join("event-streams").join(TEST_STREAM_NAME.as_str());
+    std::fs::create_dir_all(&stream_directory).unwrap();
+    // A queue link that resolves belongs to a live process, even without a lock.
+    let open_queue = tempfile::NamedTempFile::new().unwrap();
+    std::os::unix::fs::symlink(open_queue.path(), stream_directory.join("queue-1")).unwrap();
+
+    let error = EventSystem::new(path).unwrap_err();
+    assert_eq!(io_error_kind(&error), ErrorKind::ResourceBusy);
+    assert!(stream_directory.join("queue-1").exists());
+}
+
+#[rstest]
+#[case::unexpected_root_entry("unrelated-file")]
+#[case::unexpected_stream_entry("event-streams/test-stream/unrelated-file")]
+fn create_event_system_leaves_unexpected_contents_untouched(#[case] unexpected_entry: &str) {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path();
+    let unexpected_entry = path.join(unexpected_entry);
+    std::fs::create_dir_all(unexpected_entry.parent().unwrap()).unwrap();
+    std::fs::write(&unexpected_entry, b"unrelated contents").unwrap();
+
+    let error = EventSystem::new(path).unwrap_err();
+    assert_eq!(io_error_kind(&error), ErrorKind::DirectoryNotEmpty);
+    assert_eq!(
+        std::fs::read(&unexpected_entry).unwrap(),
+        b"unrelated contents"
+    );
 }
 
 #[test]
