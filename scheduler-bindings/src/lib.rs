@@ -393,7 +393,7 @@ pub mod worker_message_types {
         ///
         /// - If we successfully get a bank and try your request, this slot is the latest
         ///   bank we attempted (during a slot roll we can try 2 banks ).
-        /// - If we do not attempt or attemp and fail to get a bank, this field will be
+        /// - If we do not attempt or attempt and fail to get a bank, this field will be
         ///   zero.
         pub execution_slot: u64,
         /// Indicates if the transaction was included in the block or not.
@@ -401,7 +401,8 @@ pub mod worker_message_types {
         pub not_included_reason: u8,
         /// If included, cost units used by the transaction.
         pub cost_units: u64,
-        /// If included, the fee-payer balance after execution.
+        /// If included, the fee-payer balance after execution, if the fee-payer is valid.
+        /// Transactions that are included as no-op due to invalid fee-payer report 0 here.
         pub fee_payer_balance: u64,
     }
 
