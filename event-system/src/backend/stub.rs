@@ -27,6 +27,10 @@ impl<E> Debug for Publisher<E> {
 }
 
 impl<E> Publisher<E> {
+    pub(crate) fn new() -> Self {
+        Self { _data: PhantomData }
+    }
+
     pub(crate) fn publish(&mut self, _event: &E) -> Result<(), PublishError> {
         Ok(())
     }
@@ -73,7 +77,7 @@ impl<E: Event> PublisherFactory<E> {
     }
 
     pub(crate) fn try_create_publisher(&self) -> Option<Publisher<E>> {
-        Some(Publisher { _data: PhantomData })
+        Some(Publisher::new())
     }
 }
 
