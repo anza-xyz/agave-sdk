@@ -5,6 +5,7 @@ mod bytes;
 mod instructions_frame;
 mod message_frame;
 mod message_header_frame;
+pub mod message_view;
 pub mod resolved_transaction_view;
 pub mod result;
 pub mod sanitize;
