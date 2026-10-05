@@ -2,6 +2,8 @@ use {
     crate::{
         address_table_lookup_frame::AddressTableLookupIterator,
         instructions_frame::InstructionsIterator,
+        message_frame::MessageFrame,
+        message_view::MessageViewRef,
         result::Result,
         sanitize::{SanitizeConfig, sanitize},
         transaction_config_frame::TransactionConfigView,
@@ -92,6 +94,12 @@ impl<D: TransactionData> TransactionView<true, D> {
 }
 
 impl<const SANITIZED: bool, D: TransactionData> TransactionView<SANITIZED, D> {
+    /// Return a view of the message of the transaction.
+    #[inline]
+    pub fn message(&self) -> MessageViewRef<'_, SANITIZED> {
+        MessageViewRef::from_transaction_view(self)
+    }
+
     /// Return the number of signatures in the transaction.
     #[inline]
     pub fn num_signatures(&self) -> u8 {
@@ -163,45 +171,31 @@ impl<const SANITIZED: bool, D: TransactionData> TransactionView<SANITIZED, D> {
     /// Return the slice of static account keys in the transaction.
     #[inline]
     pub fn static_account_keys(&self) -> &[Pubkey] {
-        let data = self.data();
-        // SAFETY: `frame` was created from `data`.
-        unsafe { self.frame.message.static_account_keys(data) }
+        self.message().static_account_keys()
     }
 
     /// Return the recent blockhash in the transaction.
     #[inline]
     pub fn recent_blockhash(&self) -> &Hash {
-        let data = self.data();
-        // SAFETY: `frame` was created from `data`.
-        unsafe { self.frame.message.recent_blockhash(data) }
+        self.message().recent_blockhash()
     }
 
     /// Return an iterator over the instructions in the transaction.
     #[inline]
     pub fn instructions_iter(&self) -> InstructionsIterator<'_> {
-        let data = self.data();
-        // SAFETY: `frame` was created from `data`.
-        unsafe { self.frame.message.instructions_iter(data) }
+        self.message().instructions_iter()
     }
 
     /// Return an iterator over the address table lookups in the transaction.
     #[inline]
     pub fn address_table_lookup_iter(&self) -> AddressTableLookupIterator<'_> {
-        let data = self.data();
-        // SAFETY: `frame` was created from `data`.
-        unsafe { self.frame.message.address_table_lookup_iter(data) }
+        self.message().address_table_lookup_iter()
     }
 
     /// Return Some(TransactionConfigView) for V1, None for legacy/V0
     #[inline]
     pub fn transaction_config(&self) -> Option<TransactionConfigView<'_>> {
-        let transaction_config_frame = self.frame.message.transaction_config_frame();
-        transaction_config_frame
-            .is_present()
-            .then_some(TransactionConfigView {
-                transaction_config_frame,
-                bytes: self.data(),
-            })
+        self.message().transaction_config()
     }
 
     /// Return the full serialized transaction data.
@@ -219,8 +213,7 @@ impl<const SANITIZED: bool, D: TransactionData> TransactionView<SANITIZED, D> {
     /// This does not include the signatures.
     #[inline]
     pub fn message_data(&self) -> &[u8] {
-        let (start, end) = self.frame.message.message_range();
-        &self.data()[usize::from(start)..usize::from(end)]
+        self.message().data()
     }
 
     #[inline]
@@ -232,6 +225,12 @@ impl<const SANITIZED: bool, D: TransactionData> TransactionView<SANITIZED, D> {
     pub fn into_inner_data(self) -> D {
         self.data
     }
+
+    /// Return the framing data of the message.
+    #[inline]
+    pub(crate) fn message_frame(&self) -> &MessageFrame {
+        &self.frame.message
+    }
 }
 
 // Implementation that relies on sanitization checks having been run.
@@ -240,53 +239,31 @@ impl<D: TransactionData> TransactionView<true, D> {
     pub fn program_instructions_iter(
         &self,
     ) -> impl Iterator<Item = (&Pubkey, SVMInstruction<'_>)> + Clone {
-        self.instructions_iter().map(|ix| {
-            let program_id_index = usize::from(ix.program_id_index);
-            let program_id = &self.static_account_keys()[program_id_index];
-            (program_id, ix)
-        })
-    }
-
-    /// Return the number of unsigned static account keys.
-    #[inline]
-    pub(crate) fn num_static_unsigned_static_accounts(&self) -> u8 {
-        self.num_static_account_keys()
-            .wrapping_sub(self.num_required_signatures())
+        self.message().program_instructions_iter()
     }
 
     /// Return the number of writable unsigned static accounts.
     #[inline]
     pub(crate) fn num_writable_unsigned_static_accounts(&self) -> u8 {
-        self.num_static_unsigned_static_accounts()
-            .wrapping_sub(self.num_readonly_unsigned_static_accounts())
+        self.message().num_writable_unsigned_static_accounts()
     }
 
     /// Return the number of writable unsigned static accounts.
     #[inline]
     pub(crate) fn num_writable_signed_static_accounts(&self) -> u8 {
-        self.num_required_signatures()
-            .wrapping_sub(self.num_readonly_signed_static_accounts())
+        self.message().num_writable_signed_static_accounts()
     }
 
     /// Return the total number of accounts in the transactions.
     #[inline]
     pub fn total_num_accounts(&self) -> u16 {
-        u16::from(self.num_static_account_keys())
-            .wrapping_add(self.total_writable_lookup_accounts())
-            .wrapping_add(self.total_readonly_lookup_accounts())
+        self.message().total_num_accounts()
     }
 
     /// Return the number of requested writable keys.
     #[inline]
     pub fn num_requested_write_locks(&self) -> u64 {
-        u64::from(
-            u16::from(
-                (self.num_static_account_keys())
-                    .wrapping_sub(self.num_readonly_signed_static_accounts())
-                    .wrapping_sub(self.num_readonly_unsigned_static_accounts()),
-            )
-            .wrapping_add(self.total_writable_lookup_accounts()),
-        )
+        self.message().num_requested_write_locks()
     }
 }
 
