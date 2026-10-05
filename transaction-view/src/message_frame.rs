@@ -17,7 +17,8 @@ use {
 };
 
 /// Framing data for a message, i.e. the signed portion of a transaction.
-/// Offsets are relative to the start of the transaction.
+/// Offsets are relative to the start of the parsed buffer, which is the
+/// whole transaction if the message was parsed as part of one.
 #[derive(Debug, Clone)]
 pub(crate) struct MessageFrame {
     /// Message header framing data.
@@ -37,6 +38,24 @@ pub(crate) struct MessageFrame {
 }
 
 impl MessageFrame {
+    /// Parse a serialized message and verify basic structure.
+    /// The `bytes` parameter must have no trailing data.
+    pub(crate) fn try_new(bytes: &[u8]) -> Result<Self> {
+        // Unlike transactions, legacy/v0 and v1 messages can only be told
+        // apart by the full version byte, since v0 messages also have the
+        // MSB set.
+        let message_frame = if bytes.first() == Some(&solana_message::v1::V1_PREFIX) {
+            Self::try_new_as_v1(bytes)?
+        } else {
+            Self::try_new_as_legacy_or_v0(bytes, 0)?
+        };
+        // Verify that the entire buffer was parsed.
+        if usize::from(message_frame.end_offset) != bytes.len() {
+            return Err(TransactionViewError::ParseError);
+        }
+        Ok(message_frame)
+    }
+
     /// Parse a legacy or v0 message starting at `offset`.
     pub(crate) fn try_new_as_legacy_or_v0(bytes: &[u8], mut offset: usize) -> Result<Self> {
         let message_header = MessageHeaderFrame::try_new(bytes, &mut offset)?;
@@ -94,8 +113,8 @@ impl MessageFrame {
         let message_offset = offset as u16;
         // Version Byte
         let version = unsafe { unchecked_read_byte(bytes, &mut offset) };
-        let version = match version & !solana_message::MESSAGE_VERSION_PREFIX {
-            1 => TransactionVersion::V1,
+        let version = match version {
+            solana_message::v1::V1_PREFIX => TransactionVersion::V1,
             _ => return Err(TransactionViewError::ParseError),
         };
         // Legacy Header
@@ -313,5 +332,30 @@ impl MessageFrame {
             num_address_table_lookups: self.address_table_lookup.num_address_table_lookups,
             index: 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        solana_message::{Message, VersionedMessage},
+    };
+
+    #[test]
+    fn test_try_new_as_v1_rejects_legacy_message() {
+        // A legacy message with one required signature starts with 0x01,
+        // which differs from the v1 version byte only in the MSB.
+        let bytes = wincode::serialize(&VersionedMessage::Legacy(Message::new(
+            &[],
+            Some(&Pubkey::new_unique()),
+        )))
+        .unwrap();
+        assert_eq!(bytes[0], 1);
+
+        assert!(matches!(
+            MessageFrame::try_new_as_v1(&bytes),
+            Err(TransactionViewError::ParseError),
+        ));
     }
 }

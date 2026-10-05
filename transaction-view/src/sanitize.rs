@@ -32,6 +32,15 @@ pub(crate) fn sanitize(
     sanitize_message_body(view.message(), config)
 }
 
+/// Checks for a bare message, i.e. one that is not part of a transaction.
+pub(crate) fn sanitize_message(
+    view: UnsanitizedMessageViewRef<'_>,
+    config: &SanitizeConfig,
+) -> Result<()> {
+    sanitize_message_size(view)?;
+    sanitize_message_body(view, config)
+}
+
 /// Checks that only concern the message.
 fn sanitize_message_body(
     view: UnsanitizedMessageViewRef<'_>,
@@ -50,15 +59,41 @@ fn sanitize_message_body(
 fn sanitize_transaction_size(
     view: &UnsanitizedTransactionView<impl TransactionData>,
 ) -> Result<()> {
-    let max_transaction_size = match view.version() {
-        TransactionVersion::Legacy | TransactionVersion::V0 => solana_packet::PACKET_DATA_SIZE,
-        TransactionVersion::V1 => solana_message::v1::MAX_TRANSACTION_SIZE,
-    };
-
-    if view.data().len() > max_transaction_size {
+    if view.data().len() > max_transaction_size(view.version()) {
         return Err(TransactionViewError::SanitizeError);
     }
     Ok(())
+}
+
+/// Message constraints:
+/// * the transaction formed by signing the message must satisfy
+///   [`sanitize_transaction_size`]
+fn sanitize_message_size(view: UnsanitizedMessageViewRef<'_>) -> Result<()> {
+    // Cannot overflow: at most `u8::MAX` signatures and `u16::MAX` bytes of
+    // message.
+    let signed_len = usize::from(view.num_required_signatures())
+        .wrapping_mul(core::mem::size_of::<solana_signature::Signature>())
+        .wrapping_add(view.data().len());
+    let transaction_size = match view.version() {
+        // The signatures are prefixed by their compact-u16 count, which is a
+        // single byte for at most `MAX_SIGNATURES_PER_PACKET` signatures.
+        // Messages with more are rejected by `sanitize_required_signatures`.
+        TransactionVersion::Legacy | TransactionVersion::V0 => signed_len.wrapping_add(1),
+        TransactionVersion::V1 => signed_len,
+    };
+
+    if transaction_size > max_transaction_size(view.version()) {
+        return Err(TransactionViewError::SanitizeError);
+    }
+    Ok(())
+}
+
+/// The maximum size of a serialized transaction of the given version.
+fn max_transaction_size(version: TransactionVersion) -> usize {
+    match version {
+        TransactionVersion::Legacy | TransactionVersion::V0 => solana_packet::PACKET_DATA_SIZE,
+        TransactionVersion::V1 => solana_message::v1::MAX_TRANSACTION_SIZE,
+    }
 }
 
 /// message header constraints:
@@ -217,7 +252,7 @@ fn total_number_of_accounts(view: UnsanitizedMessageViewRef<'_>) -> u16 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use {
         super::*,
         crate::transaction_view::TransactionView,
@@ -235,7 +270,7 @@ mod tests {
     };
 
     // Current protocol values; production callers supply these from agave.
-    fn test_config() -> SanitizeConfig {
+    pub(crate) fn test_config() -> SanitizeConfig {
         SanitizeConfig {
             min_requested_heap_size: 32 * 1024,
             max_requested_heap_size: 256 * 1024,
@@ -244,7 +279,7 @@ mod tests {
         }
     }
 
-    fn create_legacy_transaction(
+    pub(crate) fn create_legacy_transaction(
         num_signatures: u8,
         header: MessageHeader,
         account_keys: Vec<Pubkey>,
@@ -261,7 +296,7 @@ mod tests {
         }
     }
 
-    fn create_v0_transaction(
+    pub(crate) fn create_v0_transaction(
         num_signatures: u8,
         header: MessageHeader,
         account_keys: Vec<Pubkey>,
@@ -280,7 +315,7 @@ mod tests {
         }
     }
 
-    fn create_v1_transaction(
+    pub(crate) fn create_v1_transaction(
         num_signatures: u8,
         header: MessageHeader,
         account_keys: Vec<Pubkey>,
@@ -299,7 +334,7 @@ mod tests {
         }
     }
 
-    fn multiple_transfers() -> VersionedTransaction {
+    pub(crate) fn multiple_transfers() -> VersionedTransaction {
         let payer = Pubkey::new_unique();
         VersionedTransaction {
             signatures: vec![Signature::default()], // 1 signature to be valid.

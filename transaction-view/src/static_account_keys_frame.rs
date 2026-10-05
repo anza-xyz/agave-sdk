@@ -19,7 +19,7 @@ const LEGACY_OR_V0_MAX_STATIC_ACCOUNTS_PER_PACKET: u8 =
 pub(crate) struct StaticAccountKeysFrame {
     /// The number of static accounts in the message.
     pub(crate) num_static_accounts: u8,
-    /// The offset to the first static account in the transaction.
+    /// The offset to the first static account in the parsed buffer.
     pub(crate) offset: u16,
 }
 

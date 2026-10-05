@@ -16,7 +16,7 @@ pub(crate) enum InstructionsFrame {
     LegacyAndV0 {
         /// The number of instructions in the message.
         num_instructions: u16,
-        /// The offset to the first instruction in the transaction.
+        /// The offset to the first instruction in the parsed buffer.
         offset: u16,
         frames: Vec<LegacyAndV0InstructionFrame>,
     },

@@ -1,6 +1,7 @@
-/// Trait for accessing transaction data from an abstract byte container.
+/// Trait for accessing serialized transaction or message data from an
+/// abstract byte container.
 pub trait TransactionData {
-    /// Returns a reference to the serialized transaction data.
+    /// Returns a reference to the serialized data.
     fn data(&self) -> &[u8];
 }
 

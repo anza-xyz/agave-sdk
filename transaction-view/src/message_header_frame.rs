@@ -7,10 +7,10 @@ use {
     solana_message::MESSAGE_VERSION_PREFIX,
 };
 
-/// Metadata for accessing message header fields in a transaction view.
+/// Metadata for accessing message header fields in a transaction or message view.
 #[derive(Debug, Clone)]
 pub(crate) struct MessageHeaderFrame {
-    /// The offset to the first byte of the message in the transaction packet.
+    /// The offset to the first byte of the message in the parsed buffer.
     pub(crate) offset: u16,
     /// The version of the message.
     pub(crate) version: TransactionVersion,

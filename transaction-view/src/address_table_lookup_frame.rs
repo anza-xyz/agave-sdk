@@ -54,7 +54,7 @@ const MAX_ATLS_PER_PACKET: u8 =
 pub(crate) struct AddressTableLookupFrame {
     /// The number of address table lookups in the message.
     pub(crate) num_address_table_lookups: u8,
-    /// The offset to the first address table lookup in the transaction.
+    /// The offset to the first address table lookup in the parsed buffer.
     pub(crate) offset: u16,
     /// The total number of writable lookup accounts in the message.
     pub(crate) total_writable_lookup_accounts: u16,
