@@ -3,7 +3,7 @@ use {
         address_table_lookup_frame::AddressTableLookupIterator,
         instructions_frame::InstructionsIterator,
         message_frame::MessageFrame,
-        message_view::MessageViewRef,
+        message_view::{MessageViewRef, impl_svm_static_message},
         result::Result,
         sanitize::{SanitizeConfig, sanitize},
         transaction_config_frame::TransactionConfigView,
@@ -242,18 +242,6 @@ impl<D: TransactionData> TransactionView<true, D> {
         self.message().program_instructions_iter()
     }
 
-    /// Return the number of writable unsigned static accounts.
-    #[inline]
-    pub(crate) fn num_writable_unsigned_static_accounts(&self) -> u8 {
-        self.message().num_writable_unsigned_static_accounts()
-    }
-
-    /// Return the number of writable unsigned static accounts.
-    #[inline]
-    pub(crate) fn num_writable_signed_static_accounts(&self) -> u8 {
-        self.message().num_writable_signed_static_accounts()
-    }
-
     /// Return the total number of accounts in the transactions.
     #[inline]
     pub fn total_num_accounts(&self) -> u16 {
@@ -282,75 +270,7 @@ impl<const SANITIZED: bool, D: TransactionData> Debug for TransactionView<SANITI
     }
 }
 
-impl<D: TransactionData> SVMStaticMessage for TransactionView<true, D> {
-    fn version(&self) -> solana_transaction::versioned::TransactionVersion {
-        self.version().into()
-    }
-
-    fn num_transaction_signatures(&self) -> u64 {
-        self.num_required_signatures() as u64
-    }
-
-    fn num_write_locks(&self) -> u64 {
-        self.num_requested_write_locks()
-    }
-
-    fn num_readonly_signed_static_accounts(&self) -> u8 {
-        self.num_readonly_signed_static_accounts()
-    }
-
-    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
-        self.num_readonly_unsigned_static_accounts()
-    }
-
-    fn recent_blockhash(&self) -> &Hash {
-        self.recent_blockhash()
-    }
-
-    fn num_instructions(&self) -> usize {
-        self.num_instructions() as usize
-    }
-
-    fn instructions_iter(&self) -> impl Iterator<Item = SVMInstruction<'_>> {
-        self.instructions_iter()
-    }
-
-    fn program_instructions_iter(
-        &self,
-    ) -> impl Iterator<Item = (&Pubkey, SVMInstruction<'_>)> + Clone {
-        self.program_instructions_iter()
-    }
-
-    fn static_account_keys(&self) -> &[Pubkey] {
-        self.static_account_keys()
-    }
-
-    fn fee_payer(&self) -> &Pubkey {
-        &self.static_account_keys()[0]
-    }
-
-    fn num_lookup_tables(&self) -> usize {
-        self.num_address_table_lookups() as usize
-    }
-
-    fn message_address_table_lookups(
-        &self,
-    ) -> impl Iterator<Item = SVMMessageAddressTableLookup<'_>> {
-        self.address_table_lookup_iter()
-    }
-
-    fn is_signer(&self, index: usize) -> bool {
-        index < usize::from(self.num_required_signatures())
-    }
-
-    fn is_invoked(&self, key_index: usize) -> bool {
-        let Ok(index) = u8::try_from(key_index) else {
-            return false;
-        };
-        self.instructions_iter()
-            .any(|ix| ix.program_id_index == index)
-    }
-}
+impl_svm_static_message!([D: TransactionData] TransactionView<true, D>, |self| self);
 
 impl<D: TransactionData> SVMStaticTransaction for TransactionView<true, D> {
     fn signature(&self) -> &Signature {

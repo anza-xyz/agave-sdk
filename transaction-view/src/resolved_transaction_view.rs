@@ -1,28 +1,22 @@
 use {
     crate::{
-        result::{Result, TransactionViewError},
+        message_view::impl_svm_static_message,
+        resolved_message_view::{cache_is_writable, verify_resolved_addresses},
+        result::Result,
         transaction_data::TransactionData,
-        transaction_version::TransactionVersion,
         transaction_view::TransactionView,
     },
     core::{
         fmt::{Debug, Formatter},
         ops::Deref,
     },
-    solana_hash::Hash,
     solana_message::{
         AccountKeys,
         v0::{LoadedAddresses, LoadedAddressesView},
     },
     solana_pubkey::Pubkey,
-    solana_sdk_ids::bpf_loader_upgradeable,
     solana_signature::Signature,
-    solana_svm_transaction::{
-        instruction::SVMInstruction,
-        message_address_table_lookup::SVMMessageAddressTableLookup,
-        svm_message::{SVMMessage, SVMStaticMessage},
-        svm_transaction::SVMStaticTransaction,
-    },
+    solana_svm_transaction::{svm_message::SVMMessage, svm_transaction::SVMStaticTransaction},
     std::{collections::HashSet, hash::BuildHasher},
 };
 
@@ -76,102 +70,18 @@ where
     ) -> Result<Self> {
         let resolved_addresses_view = resolved_addresses.as_ref().map(LoadedAddressesView::from);
 
-        // verify that the number of readable and writable match up.
-        // This is a basic sanity check to make sure we're not passing a totally
-        // invalid set of resolved addresses.
-        // Additionally if it is a v0 transaction it *must* have resolved
-        // addresses, even if they are empty.
-        if matches!(view.version(), TransactionVersion::V0) && resolved_addresses_view.is_none() {
-            return Err(TransactionViewError::AddressLookupMismatch);
-        }
-        if let Some(loaded_addresses_view) = resolved_addresses_view {
-            if loaded_addresses_view.writable.len()
-                != usize::from(view.total_writable_lookup_accounts())
-                || loaded_addresses_view.readonly.len()
-                    != usize::from(view.total_readonly_lookup_accounts())
-            {
-                return Err(TransactionViewError::AddressLookupMismatch);
-            }
-        } else if view.total_writable_lookup_accounts() != 0
-            || view.total_readonly_lookup_accounts() != 0
-        {
-            return Err(TransactionViewError::AddressLookupMismatch);
-        }
+        verify_resolved_addresses(view.message(), resolved_addresses_view)?;
 
-        let writable_cache =
-            Self::cache_is_writable(&view, resolved_addresses_view, reserved_account_keys);
+        let writable_cache = cache_is_writable(
+            view.message(),
+            resolved_addresses_view,
+            reserved_account_keys,
+        );
         Ok(Self {
             view,
             resolved_addresses,
             writable_cache,
         })
-    }
-
-    /// Helper function to check if an address is writable,
-    /// and cache the result.
-    /// This is done so we avoid recomputing the expensive checks each time we call
-    /// `is_writable` - since there is more to it than just checking index.
-    fn cache_is_writable<S: BuildHasher>(
-        view: &TransactionView<true, D>,
-        resolved_addresses: Option<LoadedAddressesView<'_>>,
-        reserved_account_keys: &HashSet<Pubkey, S>,
-    ) -> [bool; 256] {
-        // Build account keys so that we can iterate over and check if
-        // an address is writable.
-        let account_keys = AccountKeys::new_with_loaded_addresses_view(
-            view.static_account_keys(),
-            resolved_addresses,
-        );
-
-        let mut is_writable_cache = [false; 256];
-        let num_static_account_keys = usize::from(view.num_static_account_keys());
-        let num_writable_lookup_accounts = usize::from(view.total_writable_lookup_accounts());
-        let num_signed_accounts = usize::from(view.num_required_signatures());
-        let num_writable_unsigned_static_accounts =
-            usize::from(view.num_writable_unsigned_static_accounts());
-        let num_writable_signed_static_accounts =
-            usize::from(view.num_writable_signed_static_accounts());
-
-        for (index, key) in account_keys.iter().enumerate() {
-            let is_requested_write = {
-                // If the account is a resolved address, check if it is writable.
-                if index >= num_static_account_keys {
-                    let loaded_address_index = index.wrapping_sub(num_static_account_keys);
-                    loaded_address_index < num_writable_lookup_accounts
-                } else if index >= num_signed_accounts {
-                    let unsigned_account_index = index.wrapping_sub(num_signed_accounts);
-                    unsigned_account_index < num_writable_unsigned_static_accounts
-                } else {
-                    index < num_writable_signed_static_accounts
-                }
-            };
-
-            // If the key is reserved it cannot be writable.
-            is_writable_cache[index] = is_requested_write && !reserved_account_keys.contains(key);
-        }
-
-        // If a program account is locked, it cannot be writable unless the
-        // upgradable loader is present.
-        // However, checking for the upgradable loader is somewhat expensive, so
-        // we only do it if we find a writable program id.
-        let mut is_upgradable_loader_present = None;
-        for ix in view.instructions_iter() {
-            let program_id_index = usize::from(ix.program_id_index);
-            if is_writable_cache[program_id_index]
-                && !*is_upgradable_loader_present.get_or_insert_with(|| {
-                    for key in account_keys.iter() {
-                        if key == &bpf_loader_upgradeable::ID {
-                            return true;
-                        }
-                    }
-                    false
-                })
-            {
-                is_writable_cache[program_id_index] = false;
-            }
-        }
-
-        is_writable_cache
     }
 
     /// Returns a borrowed view of the resolved addresses.
@@ -188,81 +98,7 @@ impl<D: TransactionData, A> ResolvedTransactionView<D, A> {
     }
 }
 
-impl<D: TransactionData, A> SVMStaticMessage for ResolvedTransactionView<D, A> {
-    fn version(&self) -> solana_transaction::versioned::TransactionVersion {
-        self.view.version().into()
-    }
-
-    fn num_transaction_signatures(&self) -> u64 {
-        u64::from(self.view.num_required_signatures())
-    }
-
-    fn num_write_locks(&self) -> u64 {
-        self.view.num_requested_write_locks()
-    }
-
-    fn num_readonly_signed_static_accounts(&self) -> u8 {
-        self.view.num_readonly_signed_static_accounts()
-    }
-
-    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
-        self.view.num_readonly_unsigned_static_accounts()
-    }
-
-    fn recent_blockhash(&self) -> &Hash {
-        self.view.recent_blockhash()
-    }
-
-    fn num_instructions(&self) -> usize {
-        usize::from(self.view.num_instructions())
-    }
-
-    fn instructions_iter(&self) -> impl Iterator<Item = SVMInstruction<'_>> {
-        self.view.instructions_iter()
-    }
-
-    fn program_instructions_iter(
-        &self,
-    ) -> impl Iterator<
-        Item = (
-            &solana_pubkey::Pubkey,
-            solana_svm_transaction::instruction::SVMInstruction<'_>,
-        ),
-    > + Clone {
-        self.view.program_instructions_iter()
-    }
-
-    fn static_account_keys(&self) -> &[Pubkey] {
-        self.view.static_account_keys()
-    }
-
-    fn fee_payer(&self) -> &Pubkey {
-        &self.view.static_account_keys()[0]
-    }
-
-    fn num_lookup_tables(&self) -> usize {
-        usize::from(self.view.num_address_table_lookups())
-    }
-
-    fn message_address_table_lookups(
-        &self,
-    ) -> impl Iterator<Item = SVMMessageAddressTableLookup<'_>> {
-        self.view.address_table_lookup_iter()
-    }
-
-    fn is_signer(&self, index: usize) -> bool {
-        index < usize::from(self.view.num_required_signatures())
-    }
-
-    fn is_invoked(&self, key_index: usize) -> bool {
-        let Ok(index) = u8::try_from(key_index) else {
-            return false;
-        };
-        self.view
-            .instructions_iter()
-            .any(|ix| ix.program_id_index == index)
-    }
-}
+impl_svm_static_message!([D: TransactionData, A] ResolvedTransactionView<D, A>, |self| self.view);
 
 impl<D: TransactionData, A> SVMMessage for ResolvedTransactionView<D, A>
 where
@@ -302,14 +138,18 @@ impl<D: TransactionData, A> Debug for ResolvedTransactionView<D, A> {
 mod tests {
     use {
         super::*,
-        crate::{sanitize::SanitizeConfig, transaction_view::SanitizedTransactionView},
+        crate::{
+            result::TransactionViewError, sanitize::SanitizeConfig,
+            transaction_view::SanitizedTransactionView,
+        },
+        solana_hash::Hash,
         solana_message::{
             MessageHeader, VersionedMessage,
             compiled_instruction::CompiledInstruction,
             v0::{self, MessageAddressTableLookup},
         },
         solana_pubkey::PubkeyHasherBuilder,
-        solana_sdk_ids::{system_program, sysvar},
+        solana_sdk_ids::{bpf_loader_upgradeable, system_program, sysvar},
         solana_signature::Signature,
         solana_transaction::versioned::VersionedTransaction,
     };

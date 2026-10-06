@@ -13,10 +13,7 @@ use {
     core::fmt::{Debug, Formatter},
     solana_hash::Hash,
     solana_pubkey::Pubkey,
-    solana_svm_transaction::{
-        instruction::SVMInstruction, message_address_table_lookup::SVMMessageAddressTableLookup,
-        svm_message::SVMStaticMessage,
-    },
+    solana_svm_transaction::instruction::SVMInstruction,
 };
 
 // alias for convenience
@@ -300,75 +297,96 @@ impl<const SANITIZED: bool> Debug for MessageViewRef<'_, SANITIZED> {
     }
 }
 
-impl SVMStaticMessage for MessageViewRef<'_, true> {
-    fn version(&self) -> solana_transaction::versioned::TransactionVersion {
-        self.version().into()
-    }
+/// Implements `SVMStaticMessage` for `$ty` by forwarding to the accessors of
+/// `$view`, a sanitized transaction or message view. `$self` must be `self`:
+/// it is passed in so that `$view` can refer to it.
+macro_rules! impl_svm_static_message {
+    ([$($generics:tt)*] $ty:ty, |$self:ident| $view:expr) => {
+        impl<$($generics)*> ::solana_svm_transaction::svm_message::SVMStaticMessage for $ty {
+            fn version(&$self) -> ::solana_transaction::versioned::TransactionVersion {
+                $view.version().into()
+            }
 
-    fn num_transaction_signatures(&self) -> u64 {
-        self.num_required_signatures() as u64
-    }
+            fn num_transaction_signatures(&$self) -> u64 {
+                $view.num_required_signatures() as u64
+            }
 
-    fn num_write_locks(&self) -> u64 {
-        self.num_requested_write_locks()
-    }
+            fn num_write_locks(&$self) -> u64 {
+                $view.num_requested_write_locks()
+            }
 
-    fn num_readonly_signed_static_accounts(&self) -> u8 {
-        self.num_readonly_signed_static_accounts()
-    }
+            fn num_readonly_signed_static_accounts(&$self) -> u8 {
+                $view.num_readonly_signed_static_accounts()
+            }
 
-    fn num_readonly_unsigned_static_accounts(&self) -> u8 {
-        self.num_readonly_unsigned_static_accounts()
-    }
+            fn num_readonly_unsigned_static_accounts(&$self) -> u8 {
+                $view.num_readonly_unsigned_static_accounts()
+            }
 
-    fn recent_blockhash(&self) -> &Hash {
-        self.recent_blockhash()
-    }
+            fn recent_blockhash(&$self) -> &::solana_hash::Hash {
+                $view.recent_blockhash()
+            }
 
-    fn num_instructions(&self) -> usize {
-        self.num_instructions() as usize
-    }
+            fn num_instructions(&$self) -> usize {
+                $view.num_instructions() as usize
+            }
 
-    fn instructions_iter(&self) -> impl Iterator<Item = SVMInstruction<'_>> {
-        self.instructions_iter()
-    }
+            fn instructions_iter(
+                &$self,
+            ) -> impl Iterator<Item = ::solana_svm_transaction::instruction::SVMInstruction<'_>>
+            {
+                $view.instructions_iter()
+            }
 
-    fn program_instructions_iter(
-        &self,
-    ) -> impl Iterator<Item = (&Pubkey, SVMInstruction<'_>)> + Clone {
-        self.program_instructions_iter()
-    }
+            fn program_instructions_iter(
+                &$self,
+            ) -> impl Iterator<
+                Item = (
+                    &::solana_pubkey::Pubkey,
+                    ::solana_svm_transaction::instruction::SVMInstruction<'_>,
+                ),
+            > + Clone {
+                $view.program_instructions_iter()
+            }
 
-    fn static_account_keys(&self) -> &[Pubkey] {
-        self.static_account_keys()
-    }
+            fn static_account_keys(&$self) -> &[::solana_pubkey::Pubkey] {
+                $view.static_account_keys()
+            }
 
-    fn fee_payer(&self) -> &Pubkey {
-        &self.static_account_keys()[0]
-    }
+            fn fee_payer(&$self) -> &::solana_pubkey::Pubkey {
+                &$view.static_account_keys()[0]
+            }
 
-    fn num_lookup_tables(&self) -> usize {
-        self.num_address_table_lookups() as usize
-    }
+            fn num_lookup_tables(&$self) -> usize {
+                $view.num_address_table_lookups() as usize
+            }
 
-    fn message_address_table_lookups(
-        &self,
-    ) -> impl Iterator<Item = SVMMessageAddressTableLookup<'_>> {
-        self.address_table_lookup_iter()
-    }
+            fn message_address_table_lookups(
+                &$self,
+            ) -> impl Iterator<
+                Item = ::solana_svm_transaction::message_address_table_lookup::SVMMessageAddressTableLookup<'_>,
+            > {
+                $view.address_table_lookup_iter()
+            }
 
-    fn is_signer(&self, index: usize) -> bool {
-        index < usize::from(self.num_required_signatures())
-    }
+            fn is_signer(&$self, index: usize) -> bool {
+                index < usize::from($view.num_required_signatures())
+            }
 
-    fn is_invoked(&self, key_index: usize) -> bool {
-        let Ok(index) = u8::try_from(key_index) else {
-            return false;
-        };
-        self.instructions_iter()
-            .any(|ix| ix.program_id_index == index)
-    }
+            fn is_invoked(&$self, key_index: usize) -> bool {
+                let Ok(index) = u8::try_from(key_index) else {
+                    return false;
+                };
+                $view
+                    .instructions_iter()
+                    .any(|ix| ix.program_id_index == index)
+            }
+        }
+    };
 }
+pub(crate) use impl_svm_static_message;
+
+impl_svm_static_message!([] MessageViewRef<'_, true>, |self| self);
 
 #[cfg(test)]
 mod tests {
@@ -387,6 +405,10 @@ mod tests {
             compiled_instruction::CompiledInstruction, v0, v1,
         },
         solana_signature::Signature,
+        solana_svm_transaction::{
+            message_address_table_lookup::SVMMessageAddressTableLookup,
+            svm_message::SVMStaticMessage,
+        },
         solana_system_interface::instruction as system_instruction,
         solana_transaction::versioned::VersionedTransaction,
     };
