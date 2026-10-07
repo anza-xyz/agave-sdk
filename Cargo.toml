@@ -60,7 +60,7 @@ solana-sdk-ids = "3.1.0"
 solana-short-vec = "3.3.0"
 solana-signature = { version = "3.5.2", default-features = false }
 solana-signer = "4.0.0"
-solana-svm-transaction = "6.0.0"
+solana-svm-transaction = "7.0.0"
 solana-system-interface = { version = "3.3", features = ["alloc", "wincode"] }
 solana-transaction = "5.0.0"
 solana-transaction-error = "4.0.0"
