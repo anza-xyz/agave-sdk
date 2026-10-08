@@ -541,6 +541,10 @@ pub mod worker_message_types {
         pub const INVALID_NONCE: u8 = 1 << 3;
         /// Flag set if the transaction version is not supported by the bank.
         pub const UNSUPPORTED_VERSION: u8 = 1 << 4;
+        /// Flag set if age/nonce checks successfully validated a durable nonce.
+        /// A nonce-like transaction accepted using a recent blockhash does not
+        /// set this flag.
+        pub const VALIDATED_NONCE: u8 = 1 << 5;
     }
 
     pub mod fee_payer_balance_flags {
