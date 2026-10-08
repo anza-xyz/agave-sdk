@@ -293,9 +293,10 @@ pub struct PackToCheckWorkerMessage {
 }
 
 pub mod check_message_flags {
-    /// Transactions should check status: if transaction has already been processed
-    /// or the nonce is invalid.
-    pub const STATUS_CHECKS: u16 = 1 << 0;
+    /// Check the status cache for transactions that have already been processed.
+    /// When a transaction is found, its slot is returned in
+    /// [`crate::worker_message_types::CheckResponse::included_slot`].
+    pub const STATUS_CACHE_CHECKS: u16 = 1 << 0;
 
     /// Fee-payer balance should be fetched for transactions.
     pub const LOAD_FEE_PAYER_BALANCE: u16 = 1 << 1;
@@ -305,6 +306,10 @@ pub mod check_message_flags {
 
     /// Calculate transaction fee details and estimated costs for scheduling.
     pub const CALCULATE_SCHEDULING_DETAILS: u16 = 1 << 3;
+
+    /// Check transaction age and durable nonce validity, including expired
+    /// blockhashes and invalid durable nonces.
+    pub const AGE_NONCE_CHECKS: u16 = 1 << 4;
 }
 
 pub mod execution_message_flags {
@@ -513,23 +518,29 @@ pub mod worker_message_types {
         pub const FAILED: u8 = 1 << 0;
     }
 
-    pub mod status_check_flags {
-        /// Flag set if status checks were requested.
+    pub mod status_cache_check_flags {
+        /// Flag set if status-cache checks were requested.
         pub const REQUESTED: u8 = 1 << 0;
-        /// Flag set if status checks were performed. A previous failure
-        /// could have caused checks to be skipped.
+        /// Flag set if status-cache checks were performed. A previous failure
+        /// could have caused the check to be skipped.
         pub const PERFORMED: u8 = 1 << 1;
-        /// Flag set if status checks failed due to the transaction being
-        /// too old.
+        /// Flag set if the status-cache check found that the transaction
+        /// was already processed.
+        pub const ALREADY_PROCESSED: u8 = 1 << 2;
+    }
+
+    pub mod age_nonce_check_flags {
+        /// Flag set if age/nonce checks were requested.
+        pub const REQUESTED: u8 = 1 << 0;
+        /// Flag set if age/nonce checks were performed. A previous failure
+        /// could have caused the check to be skipped.
+        pub const PERFORMED: u8 = 1 << 1;
+        /// Flag set if the transaction's blockhash is too old.
         pub const TOO_OLD: u8 = 1 << 2;
-        /// Flag set if status checks failed due to the transaction already
-        /// being processed.
-        pub const ALREADY_PROCESSED: u8 = 1 << 3;
-        /// Flag set if status checks failed due to an invalid nonce state.
-        pub const INVALID_NONCE: u8 = 1 << 4;
-        /// Flag set if status checks failed due to unsupported version of
-        /// transaction was received.
-        pub const UNSUPPORTED_VERSION: u8 = 1 << 5;
+        /// Flag set if age/nonce checks failed due to an invalid nonce state.
+        pub const INVALID_NONCE: u8 = 1 << 3;
+        /// Flag set if the transaction version is not supported by the bank.
+        pub const UNSUPPORTED_VERSION: u8 = 1 << 4;
     }
 
     pub mod fee_payer_balance_flags {
@@ -563,16 +574,18 @@ pub mod worker_message_types {
     pub struct CheckResponse {
         /// See [`parsing_and_sanitization_flags`] for details.
         pub parsing_and_sanitization_flags: u8,
-        /// See [`status_check_flags`] for details.
-        pub status_check_flags: u8,
+        /// See [`status_cache_check_flags`] for details.
+        pub status_cache_check_flags: u8,
         /// See [`fee_payer_balance_flags`] for details.
         pub fee_payer_balance_flags: u8,
         /// See [`resolve_flags`] for details.
         pub resolve_flags: u8,
         /// See [`scheduling_details_flags`] for details.
         pub scheduling_details_flags: u8,
+        /// See [`age_nonce_check_flags`] for details.
+        pub age_nonce_check_flags: u8,
 
-        /// If [`status_check_flags::ALREADY_PROCESSED`] is set,
+        /// If [`status_cache_check_flags::ALREADY_PROCESSED`] is set,
         /// this is the slot the transaction was previously included in.
         /// Otherwise the value is undefined.
         pub included_slot: u64,
