@@ -2,7 +2,6 @@ use crate::{
     message_view::UnsanitizedMessageViewRef,
     result::{Result, TransactionViewError},
     signature_frame::MAX_SIGNATURES_PER_PACKET,
-    transaction_data::TransactionData,
     transaction_version::TransactionVersion,
     transaction_view::UnsanitizedTransactionView,
 };
@@ -24,7 +23,7 @@ pub struct SanitizeConfig {
 }
 
 pub(crate) fn sanitize(
-    view: &UnsanitizedTransactionView<impl TransactionData>,
+    view: &UnsanitizedTransactionView<impl AsRef<[u8]>>,
     config: &SanitizeConfig,
 ) -> Result<()> {
     sanitize_transaction_size(view)?;
@@ -57,9 +56,7 @@ fn sanitize_message_body(
 
 /// Transaction constraints:
 /// * size <= 4096 bytes
-fn sanitize_transaction_size(
-    view: &UnsanitizedTransactionView<impl TransactionData>,
-) -> Result<()> {
+fn sanitize_transaction_size(view: &UnsanitizedTransactionView<impl AsRef<[u8]>>) -> Result<()> {
     if view.data().len() > max_transaction_size(view.version()) {
         return Err(TransactionViewError::SanitizeError);
     }
@@ -144,7 +141,7 @@ fn sanitize_config(view: UnsanitizedMessageViewRef<'_>, config: &SanitizeConfig)
 
 /// Sigantures Constraint:
 /// * Number of signatures must equal: num_required_signatures
-fn sanitize_signatures(view: &UnsanitizedTransactionView<impl TransactionData>) -> Result<()> {
+fn sanitize_signatures(view: &UnsanitizedTransactionView<impl AsRef<[u8]>>) -> Result<()> {
     // Check the required number of signatures matches the number of signatures.
     if view.num_signatures() != view.num_required_signatures() {
         return Err(TransactionViewError::SanitizeError);
@@ -360,7 +357,7 @@ pub(crate) mod tests {
     fn test_sanitize_multiple_transfers() {
         let transaction = multiple_transfers();
         let data = wincode::serialize(&transaction).unwrap();
-        let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+        let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
         assert!(view.sanitize(&test_config()).is_ok());
     }
 
@@ -382,7 +379,7 @@ pub(crate) mod tests {
             }],
         );
         let data = wincode::serialize(&transaction).unwrap();
-        let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+        let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
         assert_eq!(
             sanitize_transaction_size(&view),
             Err(TransactionViewError::SanitizeError)
@@ -404,7 +401,7 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_signatures(&view),
                 Err(TransactionViewError::SanitizeError)
@@ -424,7 +421,7 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_signatures(&view),
                 Err(TransactionViewError::SanitizeError)
@@ -444,7 +441,7 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_required_signatures(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -464,7 +461,7 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref());
+            let view = TransactionView::try_new_unsanitized(data.as_slice());
             // SignatureFrame validates number of signatures, it throw ParseError if
             // it is less than 12
             assert!(matches!(view, Err(TransactionViewError::ParseError)));
@@ -483,7 +480,7 @@ pub(crate) mod tests {
                 TransactionConfig::empty(),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_required_signatures(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -503,7 +500,7 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_required_signatures(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -528,7 +525,7 @@ pub(crate) mod tests {
                 }],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_required_signatures(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -551,7 +548,7 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref());
+            let view = TransactionView::try_new_unsanitized(data.as_slice());
             // SignatureFrame validates number of signatures, it throw ParseError if
             // it is less than 1
             assert!(matches!(view, Err(TransactionViewError::ParseError)));
@@ -569,7 +566,7 @@ pub(crate) mod tests {
                 TransactionConfig::empty(),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_message_header(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -589,7 +586,7 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_message_header(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -609,7 +606,7 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_message_header(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -641,7 +638,7 @@ pub(crate) mod tests {
                 ],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_account_access(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -662,7 +659,7 @@ pub(crate) mod tests {
                 TransactionConfig::empty(),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_account_access(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -710,7 +707,7 @@ pub(crate) mod tests {
                 valid_instructions.clone(),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert!(sanitize_instructions(view.message(), &test_config()).is_ok());
 
             let transaction = create_v0_transaction(
@@ -721,7 +718,7 @@ pub(crate) mod tests {
                 atls.clone(),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert!(sanitize_instructions(view.message(), &test_config()).is_ok());
         }
 
@@ -737,7 +734,7 @@ pub(crate) mod tests {
                     instructions,
                 );
                 let data = wincode::serialize(&transaction).unwrap();
-                let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+                let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
                 assert_eq!(
                     sanitize_instructions(view.message(), &test_config()),
                     Err(TransactionViewError::SanitizeError)
@@ -756,7 +753,7 @@ pub(crate) mod tests {
                     atls.clone(),
                 );
                 let data = wincode::serialize(&transaction).unwrap();
-                let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+                let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
                 assert_eq!(
                     sanitize_instructions(view.message(), &test_config()),
                     Err(TransactionViewError::SanitizeError)
@@ -774,7 +771,7 @@ pub(crate) mod tests {
                     instructions,
                 );
                 let data = wincode::serialize(&transaction).unwrap();
-                let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+                let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
                 assert_eq!(
                     sanitize_instructions(view.message(), &test_config()),
                     Err(TransactionViewError::SanitizeError)
@@ -794,7 +791,7 @@ pub(crate) mod tests {
                     instructions,
                 );
                 let data = wincode::serialize(&transaction).unwrap();
-                let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+                let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
                 assert_eq!(
                     sanitize_instructions(view.message(), &test_config()),
                     Err(TransactionViewError::SanitizeError)
@@ -818,7 +815,7 @@ pub(crate) mod tests {
                     atls.clone(),
                 );
                 let data = wincode::serialize(&transaction).unwrap();
-                let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+                let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
                 assert_eq!(
                     sanitize_instructions(view.message(), &test_config()),
                     Err(TransactionViewError::SanitizeError)
@@ -841,7 +838,7 @@ pub(crate) mod tests {
                 too_many_instructions.clone(),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_instructions(view.message(), &test_config()),
                 Err(TransactionViewError::SanitizeError)
@@ -855,7 +852,7 @@ pub(crate) mod tests {
                 atls.clone(),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_instructions(view.message(), &test_config()),
                 Err(TransactionViewError::SanitizeError)
@@ -875,7 +872,7 @@ pub(crate) mod tests {
                 vec![instr],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_instructions(view.message(), &test_config()),
                 Err(TransactionViewError::SanitizeError)
@@ -894,7 +891,7 @@ pub(crate) mod tests {
                 vec![instr],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             // Exactly 255 accounts must pass sanitization.
             assert!(sanitize_instructions(view.message(), &test_config()).is_ok());
         }
@@ -937,7 +934,7 @@ pub(crate) mod tests {
                 2
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_address_table_lookups(view.message()),
                 Err(TransactionViewError::SanitizeError)
@@ -961,7 +958,7 @@ pub(crate) mod tests {
                 TransactionConfig::empty().with_heap_size(test_config().min_requested_heap_size),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert!(sanitize_config(view.message(), &test_config()).is_ok());
         }
 
@@ -979,7 +976,7 @@ pub(crate) mod tests {
                 TransactionConfig::empty().with_heap_size(test_config().max_requested_heap_size),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert!(sanitize_config(view.message(), &test_config()).is_ok());
         }
 
@@ -998,7 +995,7 @@ pub(crate) mod tests {
                     .with_heap_size(test_config().min_requested_heap_size - 1),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_config(view.message(), &test_config()),
                 Err(TransactionViewError::SanitizeError)
@@ -1020,7 +1017,7 @@ pub(crate) mod tests {
                     .with_heap_size(test_config().max_requested_heap_size + 1),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_config(view.message(), &test_config()),
                 Err(TransactionViewError::SanitizeError)
@@ -1042,7 +1039,7 @@ pub(crate) mod tests {
                     .with_heap_size(test_config().min_requested_heap_size + 1),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert_eq!(
                 sanitize_config(view.message(), &test_config()),
                 Err(TransactionViewError::SanitizeError)
@@ -1063,7 +1060,7 @@ pub(crate) mod tests {
                 TransactionConfig::empty(),
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            let view = TransactionView::try_new_unsanitized(data.as_slice()).unwrap();
             assert!(sanitize_config(view.message(), &test_config()).is_ok());
         }
     }

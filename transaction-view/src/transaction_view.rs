@@ -7,7 +7,6 @@ use {
         result::Result,
         sanitize::{SanitizeConfig, sanitize},
         transaction_config_frame::TransactionConfigView,
-        transaction_data::TransactionData,
         transaction_frame::TransactionFrame,
         transaction_version::TransactionVersion,
     },
@@ -30,18 +29,18 @@ pub type SanitizedTransactionView<D> = TransactionView<true, D>;
 /// This struct provides access to the transaction data without
 /// deserializing it. This is done by parsing and caching metadata
 /// about the layout of the serialized transaction.
-/// The owned `data` is abstracted through the `TransactionData` trait,
-/// so that different containers for the serialized transaction can be used.
+/// The owned `data` is a container of the serialized transaction that
+/// implements `AsRef<[u8]>`, so that different containers can be used.
 #[derive(Clone)]
-pub struct TransactionView<const SANITIZED: bool, D: TransactionData> {
+pub struct TransactionView<const SANITIZED: bool, D: AsRef<[u8]>> {
     data: D,
     frame: TransactionFrame,
 }
 
-impl<D: TransactionData> TransactionView<false, D> {
+impl<D: AsRef<[u8]>> TransactionView<false, D> {
     /// Creates a new `TransactionView` without running sanitization checks.
     pub fn try_new_unsanitized(data: D) -> Result<Self> {
-        let frame = TransactionFrame::try_new(data.data())?;
+        let frame = TransactionFrame::try_new(data.as_ref())?;
         Ok(Self { data, frame })
     }
 
@@ -55,7 +54,7 @@ impl<D: TransactionData> TransactionView<false, D> {
     /// serialized transaction: trailing bytes are not part of
     /// [`Self::data`].
     pub fn try_new_unsanitized_from_prefix(data: D) -> Result<(Self, usize)> {
-        let frame = TransactionFrame::try_new_from_prefix(data.data())?;
+        let frame = TransactionFrame::try_new_from_prefix(data.as_ref())?;
         let consumed_len = usize::from(frame.data_len);
         Ok((Self { data, frame }, consumed_len))
     }
@@ -70,7 +69,7 @@ impl<D: TransactionData> TransactionView<false, D> {
     }
 }
 
-impl<D: TransactionData> TransactionView<true, D> {
+impl<D: AsRef<[u8]>> TransactionView<true, D> {
     /// Creates a new `TransactionView`, running sanitization checks.
     pub fn try_new_sanitized(data: D, config: &SanitizeConfig) -> Result<Self> {
         let unsanitized_view = TransactionView::try_new_unsanitized(data)?;
@@ -93,7 +92,7 @@ impl<D: TransactionData> TransactionView<true, D> {
     }
 }
 
-impl<const SANITIZED: bool, D: TransactionData> TransactionView<SANITIZED, D> {
+impl<const SANITIZED: bool, D: AsRef<[u8]>> TransactionView<SANITIZED, D> {
     /// Return a view of the message of the transaction.
     #[inline]
     pub(crate) fn message(&self) -> MessageViewRef<'_, SANITIZED> {
@@ -206,7 +205,7 @@ impl<const SANITIZED: bool, D: TransactionData> TransactionView<SANITIZED, D> {
     #[inline]
     pub fn data(&self) -> &[u8] {
         let data_length: usize = self.frame.data_len.into();
-        &self.data.data()[..data_length]
+        &self.data.as_ref()[..data_length]
     }
 
     /// Return the serialized **message** data.
@@ -234,7 +233,7 @@ impl<const SANITIZED: bool, D: TransactionData> TransactionView<SANITIZED, D> {
 }
 
 // Implementation that relies on sanitization checks having been run.
-impl<D: TransactionData> TransactionView<true, D> {
+impl<D: AsRef<[u8]>> TransactionView<true, D> {
     /// Return an iterator over the instructions paired with their program ids.
     pub fn program_instructions_iter(
         &self,
@@ -269,7 +268,7 @@ impl<D: TransactionData> TransactionView<true, D> {
 
 // Manual implementation of `Debug` - avoids bound on `D`.
 // Prints nicely formatted struct-ish fields even for the iterator fields.
-impl<const SANITIZED: bool, D: TransactionData> Debug for TransactionView<SANITIZED, D> {
+impl<const SANITIZED: bool, D: AsRef<[u8]>> Debug for TransactionView<SANITIZED, D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("TransactionView")
             .field("frame", &self.frame)
@@ -282,7 +281,7 @@ impl<const SANITIZED: bool, D: TransactionData> Debug for TransactionView<SANITI
     }
 }
 
-impl<D: TransactionData> SVMStaticMessage for TransactionView<true, D> {
+impl<D: AsRef<[u8]>> SVMStaticMessage for TransactionView<true, D> {
     fn version(&self) -> solana_transaction::versioned::TransactionVersion {
         self.version().into()
     }
@@ -352,7 +351,7 @@ impl<D: TransactionData> SVMStaticMessage for TransactionView<true, D> {
     }
 }
 
-impl<D: TransactionData> SVMStaticTransaction for TransactionView<true, D> {
+impl<D: AsRef<[u8]>> SVMStaticTransaction for TransactionView<true, D> {
     fn signature(&self) -> &Signature {
         &self.signatures()[0]
     }
@@ -362,7 +361,7 @@ impl<D: TransactionData> SVMStaticTransaction for TransactionView<true, D> {
     }
 }
 
-impl<D: TransactionData> SVMStaticMessage for &TransactionView<true, D> {
+impl<D: AsRef<[u8]>> SVMStaticMessage for &TransactionView<true, D> {
     fn version(&self) -> solana_transaction::versioned::TransactionVersion {
         <TransactionView<true, D> as SVMStaticMessage>::version(self)
     }
@@ -428,7 +427,7 @@ impl<D: TransactionData> SVMStaticMessage for &TransactionView<true, D> {
     }
 }
 
-impl<D: TransactionData> SVMStaticTransaction for &TransactionView<true, D> {
+impl<D: AsRef<[u8]>> SVMStaticTransaction for &TransactionView<true, D> {
     fn signature(&self) -> &Signature {
         <TransactionView<true, D> as SVMStaticTransaction>::signature(self)
     }
@@ -453,7 +452,7 @@ mod tests {
 
     fn verify_transaction_view_frame(tx: &VersionedTransaction) {
         let bytes = wincode::serialize(tx).unwrap();
-        let view = TransactionView::try_new_unsanitized(bytes.as_ref()).unwrap();
+        let view = TransactionView::try_new_unsanitized(bytes.as_slice()).unwrap();
 
         assert_eq!(view.num_signatures(), tx.signatures.len() as u8);
 
@@ -541,7 +540,7 @@ mod tests {
     fn test_v1_transaction_config_present() {
         let tx = simple_v1_transaction();
         let bytes = wincode::serialize(&tx).unwrap();
-        let view = TransactionView::try_new_unsanitized(bytes.as_ref()).unwrap();
+        let view = TransactionView::try_new_unsanitized(bytes.as_slice()).unwrap();
 
         assert!(matches!(view.version(), TransactionVersion::V1));
 
@@ -556,7 +555,7 @@ mod tests {
     fn test_v1_message_data_excludes_signatures() {
         let tx = simple_v1_transaction();
         let bytes = wincode::serialize(&tx).unwrap();
-        let view = TransactionView::try_new_unsanitized(bytes.as_ref()).unwrap();
+        let view = TransactionView::try_new_unsanitized(bytes.as_slice()).unwrap();
 
         let message_data = view.message_data();
 
@@ -572,7 +571,7 @@ mod tests {
     fn test_v1_signatures_accessible() {
         let tx = simple_v1_transaction();
         let bytes = wincode::serialize(&tx).unwrap();
-        let view = TransactionView::try_new_unsanitized(bytes.as_ref()).unwrap();
+        let view = TransactionView::try_new_unsanitized(bytes.as_slice()).unwrap();
 
         assert_eq!(view.signatures().len(), 1);
         assert_eq!(view.static_account_keys().len(), 2);
