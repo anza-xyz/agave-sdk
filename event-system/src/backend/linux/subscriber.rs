@@ -10,7 +10,7 @@ use {
         sys::stat::Mode,
     },
     shaq::{
-        broadcast::{Broadcast, LaneMetadata, SliceReadGuard, UnknownType},
+        broadcast::{Broadcast, SliceReadGuard, UnknownType},
         error::WaitError,
     },
     std::{
@@ -64,6 +64,12 @@ impl Subscriber {
             read_guard,
         })
     }
+
+    pub(crate) fn lanes_metadata(&self) -> LanesMetadata {
+        LanesMetadata {
+            broadcast_handle: self.slice_consumer.broadcast_handle(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -81,15 +87,29 @@ impl<'a> StreamMessage<'a> {
         self.read_guard.as_slice()
     }
 
-    pub(crate) fn publisher_metadata(&self) -> PublisherMetadata<'_> {
-        PublisherMetadata(self.read_guard.lane_metadata())
+    pub(crate) fn lane_metadata(&self) -> LaneMetadata<'_> {
+        LaneMetadata(self.read_guard.lane_metadata())
+    }
+}
+
+/// The metadata of every lane of a stream.
+#[derive(Debug)]
+pub(crate) struct LanesMetadata {
+    broadcast_handle: Broadcast<UnknownType>,
+}
+
+impl LanesMetadata {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = LaneMetadata<'_>> + '_ {
+        (0..self.broadcast_handle.producer_slots())
+            .map_while(|lane| self.broadcast_handle.lane_metadata(lane))
+            .map(LaneMetadata)
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct PublisherMetadata<'a>(LaneMetadata<'a>);
+pub(crate) struct LaneMetadata<'a>(shaq::broadcast::LaneMetadata<'a>);
 
-impl PublisherMetadata<'_> {
+impl LaneMetadata<'_> {
     pub(crate) fn lane(&self) -> usize {
         self.0.lane()
     }

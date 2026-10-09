@@ -6,7 +6,7 @@
 
 use {
     agave_event_system::{
-        Event, EventSystem, StreamConfig, event,
+        Event, EventSystem, PublisherFactory, StreamConfig, event,
         publisher::Publisher,
         stream_name::StreamName,
         stream_policy::StreamPolicy,
@@ -92,11 +92,21 @@ impl TestContext {
     pub(crate) fn create_stream_with_subscriber<E: Event>(
         &self,
     ) -> (Publisher<E>, Subscriber<Typed<E>>) {
-        let publisher = self
+        let (publisher_factory, subscriber) =
+            self.create_stream_factory_with_subscriber(TEST_CONFIG);
+        let publisher = publisher_factory.try_create_publisher().unwrap();
+
+        (publisher, subscriber)
+    }
+
+    /// Creates [`TEST_STREAM_NAME`] with `stream_config` and connects a typed subscriber to it.
+    pub(crate) fn create_stream_factory_with_subscriber<E: Event>(
+        &self,
+        stream_config: StreamConfig,
+    ) -> (PublisherFactory<E>, Subscriber<Typed<E>>) {
+        let publisher_factory = self
             .event_system
-            .create_stream(TEST_STREAM_NAME, TEST_CONFIG)
-            .unwrap()
-            .try_create_publisher()
+            .create_stream(TEST_STREAM_NAME, stream_config)
             .unwrap();
         let subscriber = StreamExplorer::new(self.event_system_path())
             .available_streams()
@@ -105,6 +115,6 @@ impl TestContext {
             .try_connect_typed::<E>()
             .unwrap();
 
-        (publisher, subscriber)
+        (publisher_factory, subscriber)
     }
 }

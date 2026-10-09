@@ -91,7 +91,7 @@ impl std::fmt::Debug for EventSystem {
 /// Capacity and participant limits for an event stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StreamConfig {
-    /// Number of events retained in each publisher queue.
+    /// Number of events retained in each lane.
     pub capacity: usize,
     /// Maximum number of publishers that can be created for the stream.
     ///

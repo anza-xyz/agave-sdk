@@ -92,6 +92,12 @@ impl<Mode> Subscriber<Mode> {
         self.backend.recv_timeout(timeout).map(StreamMessage::new)
     }
 
+    /// Returns the [`LaneMetadata`] of every lane of the stream, including lanes
+    /// that no publisher holds.
+    pub fn lanes_metadata(&self) -> LanesMetadata {
+        LanesMetadata(self.backend.lanes_metadata())
+    }
+
     fn new(backend: backend::Subscriber) -> Self {
         Self {
             backend,
@@ -117,9 +123,9 @@ impl<Mode> std::fmt::Debug for StreamMessage<'_, Mode> {
 }
 
 impl<'a, Mode> StreamMessage<'a, Mode> {
-    /// [`PublisherMetadata`] of the publisher of this message.
-    pub fn publisher_metadata(&self) -> PublisherMetadata<'_> {
-        PublisherMetadata(self.backend.publisher_metadata())
+    /// [`LaneMetadata`] of the lane this message was published on.
+    pub fn lane_metadata(&self) -> LaneMetadata<'_> {
+        LaneMetadata(self.backend.lane_metadata())
     }
 
     fn new(backend: backend::StreamMessage<'a>) -> Self {
@@ -158,17 +164,28 @@ impl<'a> StreamMessage<'a, Dynamic> {
     }
 }
 
-/// Metadata of the [`Publisher`](crate::publisher::Publisher) lane that a [`StreamMessage`] was published on.
-#[derive(Clone, Copy, Debug)]
-pub struct PublisherMetadata<'a>(backend::PublisherMetadata<'a>);
+/// The [`LaneMetadata`] of every lane of a stream.
+#[derive(Debug)]
+pub struct LanesMetadata(backend::LanesMetadata);
 
-impl PublisherMetadata<'_> {
-    /// The lane of the publisher that sent this event.
+impl LanesMetadata {
+    /// Iterates over the [`LaneMetadata`] of each lane, in lane order.
+    pub fn iter(&self) -> impl Iterator<Item = LaneMetadata<'_>> + '_ {
+        self.0.iter().map(LaneMetadata)
+    }
+}
+
+/// Metadata of a lane of a stream.
+#[derive(Clone, Copy, Debug)]
+pub struct LaneMetadata<'a>(backend::LaneMetadata<'a>);
+
+impl LaneMetadata<'_> {
+    /// The index of this lane in the stream.
     pub fn lane(&self) -> usize {
         self.0.lane()
     }
 
-    /// The number of events the publisher could not publish on this lane because
+    /// The number of events that could not be published on this lane because
     /// subscribers did not consume them fast enough.
     pub fn rejected_items(&self) -> u64 {
         self.0.rejected_items()

@@ -137,6 +137,19 @@ impl Subscriber {
     ) -> Result<StreamMessage<'_>, RecvTimeoutError> {
         Err(RecvTimeoutError)
     }
+
+    pub(crate) fn lanes_metadata(&self) -> LanesMetadata {
+        LanesMetadata
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct LanesMetadata;
+
+impl LanesMetadata {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = LaneMetadata<'_>> + '_ {
+        std::iter::empty()
+    }
 }
 
 #[derive(Debug)]
@@ -154,17 +167,17 @@ impl<'a> StreamMessage<'a> {
         self.payload
     }
 
-    pub(crate) fn publisher_metadata(&self) -> PublisherMetadata<'_> {
-        PublisherMetadata(PhantomData)
+    pub(crate) fn lane_metadata(&self) -> LaneMetadata<'_> {
+        LaneMetadata(PhantomData)
     }
 }
 
 // 'a lifetime is there to match the `linux` backend, where the metadata is
 // borrowed from the queue's shared memory.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct PublisherMetadata<'a>(PhantomData<&'a ()>);
+pub(crate) struct LaneMetadata<'a>(PhantomData<&'a ()>);
 
-impl PublisherMetadata<'_> {
+impl LaneMetadata<'_> {
     pub(crate) fn lane(&self) -> usize {
         0
     }
