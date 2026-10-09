@@ -32,7 +32,7 @@ new_without_default = "allow"
 
 [workspace.dependencies]
 # workspace members
-agave-event-system-derive = { path = "event-system-derive", version = "0.2.0" }
+agave-event-system-derive = { path = "event-system-derive", version = "0.3.0" }
 agave-scheduler-bindings = { path = "scheduler-bindings", version = "6.0.0" }
 
 bytes = "1.12.1"

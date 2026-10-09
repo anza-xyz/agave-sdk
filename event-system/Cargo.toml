@@ -2,7 +2,7 @@
 name = "agave-event-system"
 description = "A local pub-sub system used by agave validators to publish events to outside processes."
 documentation = "https://docs.rs/agave-event-system"
-version = "0.2.0"
+version = "0.3.0"
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }

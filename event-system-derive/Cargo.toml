@@ -2,7 +2,7 @@
 name = "agave-event-system-derive"
 description = "Derive macros for the `agave-event-system` events that are published."
 documentation = "https://docs.rs/agave-event-system-derive"
-version = "0.2.0"
+version = "0.3.0"
 authors = { workspace = true }
 repository = { workspace = true }
 homepage = { workspace = true }
