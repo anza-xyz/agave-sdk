@@ -56,7 +56,7 @@ fn bench_transactions_parsing(
     group.bench_function("TransactionView", |c| {
         c.iter(|| {
             for bytes in serialized_transactions.iter() {
-                let _ = TransactionView::try_new_unsanitized(black_box(bytes.as_ref())).unwrap();
+                let _ = TransactionView::try_new_unsanitized(black_box(bytes.as_slice())).unwrap();
             }
         });
     });
@@ -65,7 +65,7 @@ fn bench_transactions_parsing(
     group.bench_function("TransactionView (Sanitized)", |c| {
         c.iter(|| {
             for bytes in serialized_transactions.iter() {
-                let _ = TransactionView::try_new_sanitized(black_box(bytes.as_ref())).unwrap();
+                let _ = TransactionView::try_new_sanitized(black_box(bytes.as_slice())).unwrap();
             }
         });
     });

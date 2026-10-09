@@ -3,8 +3,7 @@ use {
         address_table_lookup_frame::AddressTableLookupIterator,
         instructions_frame::InstructionsIterator, message_frame::MessageFrame, result::Result,
         sanitize::sanitize_message, transaction_config_frame::TransactionConfigView,
-        transaction_data::TransactionData, transaction_version::TransactionVersion,
-        transaction_view::TransactionView,
+        transaction_version::TransactionVersion, transaction_view::TransactionView,
     },
     core::fmt::{Debug, Formatter},
     solana_hash::Hash,
@@ -26,19 +25,19 @@ pub(crate) type UnsanitizedMessageViewRef<'a> = MessageViewRef<'a, false>;
 /// without its signatures. This struct provides access to the message data
 /// without deserializing it. This is done by parsing and caching metadata
 /// about the layout of the serialized message.
-/// The owned `data` is abstracted through the `TransactionData` trait,
+/// The owned `data` is abstracted through the `AsRef<[u8]>` trait,
 /// so that different containers for the serialized message can be used.
 #[derive(Clone)]
-pub struct MessageView<const SANITIZED: bool, D: TransactionData> {
+pub struct MessageView<const SANITIZED: bool, D: AsRef<[u8]>> {
     data: D,
     message_frame: MessageFrame,
 }
 
-impl<D: TransactionData> MessageView<false, D> {
+impl<D: AsRef<[u8]>> MessageView<false, D> {
     /// Creates a new `MessageView` without running sanitization checks.
     /// The `data` must contain a serialized message with no trailing bytes.
     pub fn try_new_unsanitized(data: D) -> Result<Self> {
-        let message_frame = MessageFrame::try_new(data.data())?;
+        let message_frame = MessageFrame::try_new(data.as_ref())?;
         Ok(Self {
             data,
             message_frame,
@@ -62,7 +61,7 @@ impl<D: TransactionData> MessageView<false, D> {
     }
 }
 
-impl<D: TransactionData> MessageView<true, D> {
+impl<D: AsRef<[u8]>> MessageView<true, D> {
     /// Creates a new `MessageView`, running sanitization checks.
     pub fn try_new_sanitized(data: D) -> Result<Self> {
         let unsanitized_view = MessageView::try_new_unsanitized(data)?;
@@ -70,12 +69,12 @@ impl<D: TransactionData> MessageView<true, D> {
     }
 }
 
-impl<const SANITIZED: bool, D: TransactionData> MessageView<SANITIZED, D> {
+impl<const SANITIZED: bool, D: AsRef<[u8]>> MessageView<SANITIZED, D> {
     /// Return a view of the message.
     #[inline]
     pub(crate) fn message(&self) -> MessageViewRef<'_, SANITIZED> {
         MessageViewRef {
-            data: &self.data.data()[..usize::from(self.message_frame.end_offset())],
+            data: &self.data.as_ref()[..usize::from(self.message_frame.end_offset())],
             message_frame: &self.message_frame,
         }
     }
@@ -182,7 +181,7 @@ impl<const SANITIZED: bool, D: TransactionData> MessageView<SANITIZED, D> {
 }
 
 // Implementation that relies on sanitization checks having been run.
-impl<D: TransactionData> MessageView<true, D> {
+impl<D: AsRef<[u8]>> MessageView<true, D> {
     /// Return an iterator over the instructions paired with their program ids.
     pub fn program_instructions_iter(
         &self,
@@ -205,7 +204,7 @@ impl<D: TransactionData> MessageView<true, D> {
 
 // Manual implementation of `Debug` - avoids bound on `D`.
 // Prints nicely formatted struct-ish fields even for the iterator fields.
-impl<const SANITIZED: bool, D: TransactionData> Debug for MessageView<SANITIZED, D> {
+impl<const SANITIZED: bool, D: AsRef<[u8]>> Debug for MessageView<SANITIZED, D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("MessageView")
             .field("message_frame", &self.message_frame)
@@ -217,7 +216,7 @@ impl<const SANITIZED: bool, D: TransactionData> Debug for MessageView<SANITIZED,
     }
 }
 
-impl<D: TransactionData> SVMStaticMessage for MessageView<true, D> {
+impl<D: AsRef<[u8]>> SVMStaticMessage for MessageView<true, D> {
     fn version(&self) -> solana_transaction::versioned::TransactionVersion {
         self.version().into()
     }
@@ -302,7 +301,7 @@ pub(crate) struct MessageViewRef<'a, const SANITIZED: bool> {
 impl<'a, const SANITIZED: bool> MessageViewRef<'a, SANITIZED> {
     /// Creates a view of the message of `transaction_view`.
     #[inline]
-    pub(crate) fn from_transaction_view<D: TransactionData>(
+    pub(crate) fn from_transaction_view<D: AsRef<[u8]>>(
         transaction_view: &'a TransactionView<SANITIZED, D>,
     ) -> Self {
         Self {
