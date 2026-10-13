@@ -341,12 +341,6 @@ impl<'a, const SANITIZED: bool> MessageViewRef<'a, SANITIZED> {
         self.message_frame.num_static_account_keys()
     }
 
-    /// Return the number of instructions in the message.
-    #[inline]
-    pub(crate) fn num_instructions(&self) -> u16 {
-        self.message_frame.num_instructions()
-    }
-
     /// Return the number of writable lookup accounts in the message.
     #[inline]
     pub(crate) fn total_writable_lookup_accounts(&self) -> u16 {

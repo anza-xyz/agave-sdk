@@ -1,7 +1,6 @@
 use crate::{
     message_view::UnsanitizedMessageViewRef,
     result::{Result, TransactionViewError},
-    signature_frame::MAX_SIGNATURES_PER_PACKET,
     transaction_data::TransactionData,
     transaction_version::TransactionVersion,
     transaction_view::UnsanitizedTransactionView,
@@ -106,17 +105,9 @@ fn sanitize_signatures(view: &UnsanitizedTransactionView<impl TransactionData>) 
 }
 
 /// Required Signatures Constraint:
-/// * Legacy/v0 signatures <= 12
+/// * Each signature has a static account key.
 #[inline]
 fn sanitize_required_signatures(view: UnsanitizedMessageViewRef<'_>) -> Result<()> {
-    if matches!(
-        view.version(),
-        TransactionVersion::Legacy | TransactionVersion::V0
-    ) && view.num_required_signatures() > MAX_SIGNATURES_PER_PACKET
-    {
-        return Err(TransactionViewError::SanitizeError);
-    }
-
     // Each signature is associated with a unique static public key.
     // Check that there are at least as many static account keys as signatures.
     if view.num_static_account_keys() < view.num_required_signatures() {
@@ -147,20 +138,11 @@ fn sanitize_account_access(view: UnsanitizedMessageViewRef<'_>) -> Result<()> {
 }
 
 /// Instructions Constraints
-/// * Legacy/v0 NumInstructions <= 64
 /// * Per instruction:
 ///   * 0 < program_id_index < MaxProgramIdIndex
 ///   * all account indices < MaxAccountIndex
 #[inline]
 fn sanitize_instructions(view: UnsanitizedMessageViewRef<'_>) -> Result<()> {
-    if matches!(
-        view.version(),
-        TransactionVersion::Legacy | TransactionVersion::V0
-    ) && usize::from(view.num_instructions()) > 64
-    {
-        return Err(TransactionViewError::SanitizeError);
-    }
-
     // already verified there is at least one static account.
     let max_program_id_index = view.num_static_account_keys().wrapping_sub(1);
     // verified that there are no more than 256 accounts in `sanitize_account_access`
@@ -182,14 +164,6 @@ fn sanitize_instructions(view: UnsanitizedMessageViewRef<'_>) -> Result<()> {
             if account_index > max_account_index {
                 return Err(TransactionViewError::SanitizeError);
             }
-        }
-
-        if matches!(
-            view.version(),
-            TransactionVersion::Legacy | TransactionVersion::V0
-        ) && instruction.accounts.len() > 255
-        {
-            return Err(TransactionViewError::SanitizeError);
         }
     }
 
@@ -399,7 +373,7 @@ pub(crate) mod tests {
             );
         }
 
-        // More than 12 signatures.
+        // The packet signature policy does not affect structural sanitization.
         {
             let transaction = create_legacy_transaction(
                 13,
@@ -412,10 +386,8 @@ pub(crate) mod tests {
                 vec![],
             );
             let data = wincode::serialize(&transaction).unwrap();
-            let view = TransactionView::try_new_unsanitized(data.as_ref());
-            // SignatureFrame validates number of signatures, it throw ParseError if
-            // it is less than 12
-            assert!(matches!(view, Err(TransactionViewError::ParseError)));
+            let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
+            assert!(sanitize_required_signatures(view.message()).is_ok());
         }
 
         {
@@ -768,7 +740,7 @@ pub(crate) mod tests {
             }
         }
 
-        // SIMD-0160, too many instructions are invalid
+        // The runtime instruction count policy does not affect structural sanitization.
         {
             let too_many_instructions: Vec<_> = valid_instructions
                 .iter()
@@ -784,10 +756,8 @@ pub(crate) mod tests {
             );
             let data = wincode::serialize(&transaction).unwrap();
             let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
-            assert_eq!(
-                sanitize_instructions(view.message()),
-                Err(TransactionViewError::SanitizeError)
-            );
+            assert!(sanitize_instructions(view.message()).is_ok());
+            assert!(TransactionView::try_new_sanitized(data.as_ref()).is_ok());
 
             let transaction = create_v0_transaction(
                 num_signatures,
@@ -798,13 +768,11 @@ pub(crate) mod tests {
             );
             let data = wincode::serialize(&transaction).unwrap();
             let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
-            assert_eq!(
-                sanitize_instructions(view.message()),
-                Err(TransactionViewError::SanitizeError)
-            );
+            assert!(sanitize_instructions(view.message()).is_ok());
+            assert!(TransactionView::try_new_sanitized(data.as_ref()).is_ok());
         }
 
-        // SIMD-406: Limit instruction accounts to 255
+        // The runtime accounts-per-instruction policy does not affect structural sanitization.
         {
             let mut accounts: Vec<u8> = vec![0; 254];
             accounts.push(1);
@@ -818,13 +786,11 @@ pub(crate) mod tests {
             );
             let data = wincode::serialize(&transaction).unwrap();
             let view = TransactionView::try_new_unsanitized(data.as_ref()).unwrap();
-            assert_eq!(
-                sanitize_instructions(view.message()),
-                Err(TransactionViewError::SanitizeError)
-            );
+            assert!(sanitize_instructions(view.message()).is_ok());
+            assert!(TransactionView::try_new_sanitized(data.as_ref()).is_ok());
         }
 
-        // SIMD-406: Limit instruction accounts to 255
+        // Exactly 255 accounts also pass structural sanitization.
         {
             let mut accounts: Vec<u8> = vec![0; 254];
             accounts.push(1);
