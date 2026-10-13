@@ -1,13 +1,9 @@
 use {
     crate::{
         address_table_lookup_frame::AddressTableLookupIterator,
-        instructions_frame::InstructionsIterator,
-        message_frame::MessageFrame,
-        result::Result,
-        sanitize::{SanitizeConfig, sanitize_message},
-        transaction_config_frame::TransactionConfigView,
-        transaction_data::TransactionData,
-        transaction_version::TransactionVersion,
+        instructions_frame::InstructionsIterator, message_frame::MessageFrame, result::Result,
+        sanitize::sanitize_message, transaction_config_frame::TransactionConfigView,
+        transaction_data::TransactionData, transaction_version::TransactionVersion,
         transaction_view::TransactionView,
     },
     core::fmt::{Debug, Formatter},
@@ -53,11 +49,12 @@ impl<D: TransactionData> MessageView<false, D> {
     ///
     /// A message is sanitized if the transaction formed by signing it would
     /// pass [`TransactionView::sanitize`](crate::transaction_view::TransactionView::sanitize).
+    /// V1 policy limits are enforced by the caller.
     /// Like it, this does not reject duplicate account keys, which are only
     /// checked when the accounts of a transaction are locked. Callers that do
     /// not lock the accounts of the message must check for them.
-    pub fn sanitize(self, config: &SanitizeConfig) -> Result<SanitizedMessageView<D>> {
-        sanitize_message(self.message(), config)?;
+    pub fn sanitize(self) -> Result<SanitizedMessageView<D>> {
+        sanitize_message(self.message())?;
         Ok(SanitizedMessageView {
             data: self.data,
             message_frame: self.message_frame,
@@ -67,9 +64,9 @@ impl<D: TransactionData> MessageView<false, D> {
 
 impl<D: TransactionData> MessageView<true, D> {
     /// Creates a new `MessageView`, running sanitization checks.
-    pub fn try_new_sanitized(data: D, config: &SanitizeConfig) -> Result<Self> {
+    pub fn try_new_sanitized(data: D) -> Result<Self> {
         let unsanitized_view = MessageView::try_new_unsanitized(data)?;
-        unsanitized_view.sanitize(config)
+        unsanitized_view.sanitize()
     }
 }
 
@@ -477,7 +474,7 @@ mod tests {
             result::TransactionViewError,
             sanitize::tests::{
                 create_legacy_transaction, create_v0_transaction, create_v1_transaction,
-                multiple_transfers, test_config,
+                multiple_transfers,
             },
             transaction_view::TransactionView,
         },
@@ -503,8 +500,7 @@ mod tests {
 
     fn verify_message_view(message: VersionedMessage) {
         let message_bytes = wincode::serialize(&message).unwrap();
-        let message_view =
-            MessageView::try_new_sanitized(message_bytes.as_slice(), &test_config()).unwrap();
+        let message_view = MessageView::try_new_sanitized(message_bytes.as_slice()).unwrap();
 
         assert_eq!(message_view.data(), message_bytes);
         assert_eq!(
@@ -668,8 +664,8 @@ mod tests {
             (transaction(TransactionVersion::Legacy, 0, 2, 0), false),
             // signer without a static account key
             (transaction(TransactionVersion::Legacy, 3, 2, 0), false),
-            // too many signers
-            (transaction(TransactionVersion::V1, 13, 14, 0), false),
+            // V1 signer count above the former policy limit
+            (transaction(TransactionVersion::V1, 13, 14, 0), true),
         ];
         for (version, max_transaction_size) in [
             (TransactionVersion::Legacy, solana_packet::PACKET_DATA_SIZE),
@@ -685,19 +681,21 @@ mod tests {
             };
             let max_data_len = max_transaction_size - signed_len(128) + 128;
             cases.push((transaction(version, 1, 2, max_data_len), true));
-            cases.push((transaction(version, 1, 2, max_data_len + 1), false));
+            cases.push((
+                transaction(version, 1, 2, max_data_len + 1),
+                matches!(version, TransactionVersion::V1),
+            ));
         }
 
         for (transaction, expect_ok) in cases {
             let message_bytes = wincode::serialize(&transaction.message).unwrap();
             let transaction_bytes = wincode::serialize(&transaction).unwrap();
             assert_eq!(
-                MessageView::try_new_sanitized(message_bytes.as_slice(), &test_config()).is_ok(),
+                MessageView::try_new_sanitized(message_bytes.as_slice()).is_ok(),
                 expect_ok
             );
             assert_eq!(
-                TransactionView::try_new_sanitized(transaction_bytes.as_slice(), &test_config())
-                    .is_ok(),
+                TransactionView::try_new_sanitized(transaction_bytes.as_slice()).is_ok(),
                 expect_ok
             );
         }
