@@ -327,6 +327,20 @@ pub mod execution_message_flags {
     /// to be committed. If both flags are set then any failing transaction will cause all
     /// transactions to be aborted.
     pub const ALL_OR_NOTHING: u16 = 1 << 1;
+    /// Simulate the batch as an ordered bundle instead of executing it: nothing is recorded
+    /// or committed, no fees are charged, and no account locks are taken.
+    ///
+    /// Each transaction observes the account state produced by the transactions preceding it
+    /// in the batch. The batch is always simulated with [`DROP_ON_FAILURE`] and
+    /// [`ALL_OR_NOTHING`] semantics; those flags may be set alongside this one but have no
+    /// additional effect.
+    ///
+    /// Responses are [`crate::worker_message_types::ExecutionResponse`]s: `execution_slot`
+    /// is the slot of the bank the bundle was simulated against, `not_included_reason` is
+    /// [`crate::worker_message_types::not_included_reasons::NONE`] if the transaction
+    /// simulated successfully, and `cost_units` and `fee_payer_balance` come from the
+    /// simulated execution.
+    pub const SIMULATE: u16 = 1 << 2;
 }
 
 pub mod processed_codes {
@@ -386,11 +400,12 @@ pub struct CheckWorkerToPackMessage {
 pub mod worker_message_types {
     use crate::SharablePubkeys;
 
-    /// Response to pack for a transaction that attempted execution.
+    /// Response to pack for a transaction that attempted execution, or simulation when
+    /// [`crate::execution_message_flags::SIMULATE`] was set.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     #[repr(C)]
     pub struct ExecutionResponse {
-        /// The slot this transaction was executed.
+        /// The slot this transaction was executed (or simulated) against.
         ///
         /// # Note
         ///
@@ -402,7 +417,8 @@ pub mod worker_message_types {
         ///   zero.
         pub execution_slot: u64,
         /// Indicates if the transaction was included in the block or not.
-        /// If [`not_included_reasons::NONE`], the transaction was included.
+        /// If [`not_included_reasons::NONE`], the transaction was included (or, for a
+        /// simulated batch, succeeded).
         pub not_included_reason: u8,
         /// If included, cost units used by the transaction.
         pub cost_units: u64,
