@@ -8,7 +8,7 @@ mod message_header_frame;
 pub mod message_view;
 pub mod resolved_transaction_view;
 pub mod result;
-pub mod sanitize;
+mod sanitize;
 mod signature_frame;
 mod static_account_keys_frame;
 mod transaction_config_frame;
