@@ -112,8 +112,6 @@ pub struct ClientLogon {
     pub pack_to_check_worker_capacity: usize,
     /// The minimum capacity of the check-worker-to-scheduler queue in messages.
     pub check_worker_to_pack_capacity: usize,
-    /// Flags that control the behavior of the new scheduling session.
-    pub flags: u64,
     // NB: If adding more fields please ensure:
     // - The fields are zeroable.
     // - The struct has no padding, including trailing padding, because it is sent as raw bytes.
@@ -218,8 +216,6 @@ pub(crate) fn checked_file_size(size: usize, page_size: PageSize) -> Option<usiz
         .filter(|&size| size <= POINTER_OFFSET_LIMIT)
 }
 
-pub mod logon_flags {}
-
 /// The complete initialized scheduling session.
 pub struct ClientSession {
     /// The initial allocator handle. Create additional handles with
@@ -266,7 +262,6 @@ pub enum ClientHandshakeError {
 
 /// An initialized scheduling session.
 pub struct AgaveSession {
-    pub flags: u64,
     pub tpu_to_pack: AgaveTpuToPackSession,
     pub progress_tracker: shaq::spsc::Producer<ProgressMessage>,
     pub check_workers: Vec<AgaveCheckWorkerSession>,
