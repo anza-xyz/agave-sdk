@@ -88,6 +88,9 @@ impl fmt::Display for ProtocolVersions {
 }
 
 /// The logon message sent by the client to the server.
+///
+/// This struct is sent as raw bytes and read from untrusted bytes. Every field must be valid for
+/// any byte pattern, and the struct must have no padding, including trailing padding.
 #[derive(Debug, Default, Clone, Copy)]
 #[repr(C)]
 pub struct ClientLogon {
@@ -114,13 +117,6 @@ pub struct ClientLogon {
     pub check_worker_to_pack_capacity: usize,
     /// Flags that control the behavior of the new scheduling session.
     pub flags: u64,
-    // NB: If adding more fields please ensure:
-    // - The fields are zeroable.
-    // - The struct has no padding, including trailing padding, because it is sent as raw bytes.
-    // - If possible the fields are backwards compatible:
-    //   - Added to the end of the struct.
-    //   - 0 bytes is valid default (older clients will not have the field and thus send zeroes).
-    // - If not backwards compatible, increment the version counter.
 }
 
 impl ClientLogon {
