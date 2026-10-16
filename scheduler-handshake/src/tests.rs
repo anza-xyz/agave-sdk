@@ -4,7 +4,7 @@ use {
         SessionSetupError,
         client::{connect, connect_path},
         server::Server,
-        shared::{MAX_ALLOCATOR_HANDLES, MAX_WORKERS},
+        shared::MAX_WORKERS,
     },
     agave_scheduler_bindings::{
         CheckResponseRegion, CheckWorkerToPackMessage, ExecutionResponseRegion,
@@ -474,7 +474,7 @@ fn local_session_rejects_invalid_check_worker_count() {
 
 #[test]
 fn local_session_rejects_invalid_allocator_handles() {
-    for count in [0, MAX_ALLOCATOR_HANDLES.checked_add(1).unwrap(), usize::MAX] {
+    for count in [0, u32::MAX as usize - 2, usize::MAX] {
         let result = crate::setup_local_session(ClientLogon {
             worker_count: 1,
             check_worker_count: 1,
@@ -522,7 +522,7 @@ fn setup_session_rejects_invalid_check_worker_counts() {
 
 #[test]
 fn setup_session_rejects_invalid_allocator_handles() {
-    for count in [0, MAX_ALLOCATOR_HANDLES.checked_add(1).unwrap(), usize::MAX] {
+    for count in [0, u32::MAX as usize - 2, usize::MAX] {
         let result = Server::setup_session(ClientLogon {
             worker_count: 1,
             check_worker_count: 1,

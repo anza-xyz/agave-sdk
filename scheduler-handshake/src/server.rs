@@ -3,8 +3,7 @@ use {
         AgaveCheckWorkerSession, AgaveHandshakeError, AgaveTpuToPackSession, AgaveWorkerSession,
         ClientLogon, ProtocolVersions,
         shared::{
-            AgaveSession, GLOBAL_ALLOCATORS, HUGE_PAGE_SIZE, LOGON_FAILURE, LOGON_SUCCESS,
-            PageSize, checked_file_size,
+            AgaveSession, HUGE_PAGE_SIZE, LOGON_FAILURE, LOGON_SUCCESS, PageSize, checked_file_size,
         },
     },
     agave_scheduler_bindings::{
@@ -218,13 +217,9 @@ impl Server {
     }
 
     fn create_allocator(logon: &ClientLogon) -> Result<(File, Allocator), RtsAllocError> {
-        let allocator_count = GLOBAL_ALLOCATORS
-            .checked_add(logon.worker_count)
-            .unwrap()
-            .checked_add(logon.check_worker_count)
-            .unwrap()
-            .checked_add(logon.allocator_handles)
-            .unwrap();
+        let allocator_count = logon
+            .allocator_count()
+            .expect("allocator count checked by ClientLogon::validate in Server::setup_session");
 
         let create = |page_size: PageSize| {
             let allocator_file = Self::create_shmem(page_size)?;
@@ -235,7 +230,7 @@ impl Server {
                 Allocator::create(
                     &allocator_file,
                     allocator_file_size,
-                    u32::try_from(allocator_count).unwrap(),
+                    allocator_count,
                     // Allocator slab size: chosen as 2 MiB, but need not match the OS page size.
                     HUGE_PAGE_SIZE as u32,
                 )
