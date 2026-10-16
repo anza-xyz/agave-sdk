@@ -153,26 +153,6 @@ impl Server {
             Self::create_producer(logon.tpu_to_pack_capacity, PageSize::Huge)?;
         let (progress_tracker_file, progress_tracker) =
             Self::create_producer(logon.progress_tracker_capacity, PageSize::Standard)?;
-        let (pack_to_check_worker_file, pack_to_check_worker) =
-            Self::create_mpmc_consumer::<PackToCheckWorkerMessage>(
-                logon.pack_to_check_worker_capacity,
-            )?;
-        let (check_worker_to_pack_file, check_worker_to_pack) =
-            Self::create_mpmc_producer::<CheckWorkerToPackMessage>(
-                logon.check_worker_to_pack_capacity,
-                PageSize::Huge,
-            )?;
-
-        let check_workers = (0..logon.check_worker_count)
-            .map(|_| {
-                Ok(AgaveCheckWorkerSession {
-                    allocator: Allocator::join_from_existing(&tpu_to_pack_allocator)?,
-                    pack_to_check_worker: pack_to_check_worker.clone(),
-                    check_worker_to_pack: check_worker_to_pack.clone(),
-                })
-            })
-            .collect::<Result<Vec<_>, AgaveHandshakeError>>()?;
-
         // Setup the worker sessions.
         let (worker_files, workers) = (0..logon.worker_count).try_fold(
             (Vec::default(), Vec::default()),
@@ -195,6 +175,29 @@ impl Server {
             },
         )?;
 
+        let (check_files, check_workers) = if logon.check_worker_count == 0 {
+            (Vec::new(), Vec::new())
+        } else {
+            let (request_file, request_queue) = Self::create_mpmc_consumer::<
+                PackToCheckWorkerMessage,
+            >(logon.pack_to_check_worker_capacity)?;
+            let (response_file, response_queue) =
+                Self::create_mpmc_producer::<CheckWorkerToPackMessage>(
+                    logon.check_worker_to_pack_capacity,
+                    PageSize::Huge,
+                )?;
+            let check_workers = (0..logon.check_worker_count)
+                .map(|_| {
+                    Ok(AgaveCheckWorkerSession {
+                        allocator: Allocator::join_from_existing(&tpu_to_pack_allocator)?,
+                        pack_to_check_worker: request_queue.clone(),
+                        check_worker_to_pack: response_queue.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, AgaveHandshakeError>>()?;
+            (vec![request_file, response_file], check_workers)
+        };
+
         Ok((
             AgaveSession {
                 flags: logon.flags,
@@ -203,19 +206,14 @@ impl Server {
                     producer: tpu_to_pack_queue,
                 },
                 progress_tracker,
-                check_workers,
                 workers,
+                check_workers,
             },
-            [
-                allocator_file,
-                tpu_to_pack_file,
-                progress_tracker_file,
-                pack_to_check_worker_file,
-                check_worker_to_pack_file,
-            ]
-            .into_iter()
-            .chain(worker_files)
-            .collect(),
+            [allocator_file, tpu_to_pack_file, progress_tracker_file]
+                .into_iter()
+                .chain(worker_files)
+                .chain(check_files)
+                .collect(),
         ))
     }
 

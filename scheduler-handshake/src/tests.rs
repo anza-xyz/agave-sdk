@@ -247,6 +247,9 @@ fn message_passing_on_all_queues() {
         // Send pack_to_check_worker messages.
         for i in 0..2 {
             session
+                .check_workers
+                .as_ref()
+                .unwrap()
                 .pack_to_check_worker
                 .try_write(PackToCheckWorkerMessage {
                     batch: SharableTransactionBatchRegion {
@@ -261,7 +264,13 @@ fn message_passing_on_all_queues() {
         // Receive check_worker_to_pack messages.
         let mut check_messages = Vec::new();
         while check_messages.len() < 2 {
-            if let Some(msg) = session.check_worker_to_pack.try_read() {
+            if let Some(msg) = session
+                .check_workers
+                .as_ref()
+                .unwrap()
+                .check_worker_to_pack
+                .try_read()
+            {
                 check_messages.push(msg);
             }
         }
@@ -405,6 +414,9 @@ fn local_session_message_passing_on_all_queues() {
     }
     for worker in &agave.check_workers {
         client
+            .check_workers
+            .as_ref()
+            .unwrap()
             .pack_to_check_worker
             .try_write(pack_to_check_worker)
             .unwrap();
@@ -417,7 +429,12 @@ fn local_session_message_passing_on_all_queues() {
             .try_write(check_worker_to_pack)
             .unwrap();
         assert_eq!(
-            client.check_worker_to_pack.try_read(),
+            client
+                .check_workers
+                .as_ref()
+                .unwrap()
+                .check_worker_to_pack
+                .try_read(),
             Some(check_worker_to_pack)
         );
     }
@@ -441,7 +458,7 @@ fn local_session_rejects_invalid_worker_count() {
 
 #[test]
 fn local_session_rejects_invalid_check_worker_count() {
-    for count in [0, MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
+    for count in [MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
         let result = crate::setup_local_session(ClientLogon {
             worker_count: 1,
             check_worker_count: count,
@@ -489,7 +506,7 @@ fn setup_session_rejects_invalid_worker_counts() {
 
 #[test]
 fn setup_session_rejects_invalid_check_worker_counts() {
-    for count in [0, MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
+    for count in [MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
         let result = Server::setup_session(ClientLogon {
             worker_count: 1,
             check_worker_count: count,
@@ -705,14 +722,14 @@ fn check_worker_queues_use_dedicated_capacities() {
     let (_agave, files) = Server::setup_session(logon).unwrap();
 
     assert!(
-        files[3].metadata().unwrap().len()
+        files[5].metadata().unwrap().len()
             >= u64::try_from(shaq::mpmc::minimum_file_size::<PackToCheckWorkerMessage>(
                 CHECK_REQUEST_CAPACITY
             ))
             .unwrap()
     );
     assert!(
-        files[4].metadata().unwrap().len()
+        files[6].metadata().unwrap().len()
             >= u64::try_from(shaq::mpmc::minimum_file_size::<CheckWorkerToPackMessage>(
                 CHECK_RESPONSE_CAPACITY
             ))
@@ -842,20 +859,17 @@ fn reject_worker_count_high() {
 }
 
 #[test]
-fn reject_check_worker_count_low() {
+fn accept_zero_check_workers() {
     let ipc = NamedTempFile::new().unwrap();
     std::fs::remove_file(ipc.path()).unwrap();
     let mut server = Server::new(ipc.path()).unwrap();
 
     let server_handle = std::thread::spawn(move || {
-        let res = server.accept();
-        let Err(AgaveHandshakeError::CheckWorkerCount(count)) = res else {
-            panic!();
-        };
-        assert_eq!(count, 0);
+        let session = server.accept().unwrap();
+        assert!(session.check_workers.is_empty());
     });
     let client_handle = std::thread::spawn(move || {
-        let res = connect(
+        let session = connect(
             ipc,
             ClientLogon {
                 worker_count: 1,
@@ -867,19 +881,41 @@ fn reject_check_worker_count_low() {
                 pack_to_worker_capacity: 1024,
                 worker_to_pack_capacity: 1024,
                 flags: 0,
-                pack_to_check_worker_capacity: 1024,
-                check_worker_to_pack_capacity: 1024,
+                pack_to_check_worker_capacity: usize::MAX,
+                check_worker_to_pack_capacity: usize::MAX,
             },
             Duration::from_secs(1),
-        );
-        let Err(ClientHandshakeError::Rejected(reason)) = res else {
-            panic!();
-        };
-        assert_eq!(reason, "Check worker count; count=0");
+        )
+        .unwrap();
+        assert_eq!(session.workers.len(), 1);
+        assert!(session.check_workers.is_none());
     });
 
     client_handle.join().unwrap();
     server_handle.join().unwrap();
+}
+
+#[test]
+fn zero_check_workers_have_no_queue_files() {
+    let logon = ClientLogon {
+        worker_count: 1,
+        check_worker_count: 0,
+        allocator_size: 64 * 1024 * 1024,
+        allocator_handles: 1,
+        tpu_to_pack_capacity: 2,
+        progress_tracker_capacity: 2,
+        pack_to_worker_capacity: 2,
+        worker_to_pack_capacity: 2,
+        pack_to_check_worker_capacity: usize::MAX,
+        check_worker_to_pack_capacity: usize::MAX,
+        flags: 0,
+    };
+    let (agave, files) = Server::setup_session(logon).unwrap();
+    assert!(agave.check_workers.is_empty());
+    assert_eq!(files.len(), 5);
+    // SAFETY: Server setup initialized these files, and no client endpoints have been joined.
+    let client = unsafe { crate::client::setup_session(&logon, files).unwrap() };
+    assert!(client.check_workers.is_none());
 }
 
 #[test]

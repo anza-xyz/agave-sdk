@@ -17,6 +17,9 @@ pub(crate) const LOGON_SUCCESS: u8 = 0x01;
 pub(crate) const LOGON_FAILURE: u8 = 0x02;
 pub(crate) const MAX_ALLOCATOR_HANDLES: usize = 128;
 pub(crate) const GLOBAL_ALLOCATORS: usize = 1;
+pub(crate) const GLOBAL_SHMEM: usize = 3;
+pub(crate) const CHECK_SHMEM: usize = 2;
+pub(crate) const WORKER_SHMEM: usize = 2;
 
 pub(crate) const STANDARD_PAGE_SIZE: usize = 4096;
 pub(crate) const HUGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
@@ -124,6 +127,18 @@ pub struct ClientLogon {
 }
 
 impl ClientLogon {
+    pub(crate) fn expected_file_count(&self) -> Option<usize> {
+        let check_files = if self.check_worker_count > 0 {
+            CHECK_SHMEM
+        } else {
+            0
+        };
+        self.worker_count
+            .checked_mul(WORKER_SHMEM)?
+            .checked_add(GLOBAL_SHMEM)?
+            .checked_add(check_files)
+    }
+
     /// Validates counts and checks that allocator and queue sizes can be represented.
     ///
     /// Allocation can still fail if a size is too small or resources are unavailable.
@@ -132,7 +147,7 @@ impl ClientLogon {
             return Err(AgaveHandshakeError::WorkerCount(self.worker_count));
         }
 
-        if !(1..=MAX_WORKERS).contains(&self.check_worker_count) {
+        if self.check_worker_count > MAX_WORKERS {
             return Err(AgaveHandshakeError::CheckWorkerCount(
                 self.check_worker_count,
             ));
@@ -171,18 +186,20 @@ impl ClientLogon {
             shaq::spsc::try_minimum_file_size::<ExecutionWorkerToPackMessage>,
             PageSize::Huge,
         )?;
-        validate_queue_capacity(
-            "pack_to_check_worker_capacity",
-            self.pack_to_check_worker_capacity,
-            shaq::mpmc::try_minimum_file_size::<PackToCheckWorkerMessage>,
-            PageSize::Huge,
-        )?;
-        validate_queue_capacity(
-            "check_worker_to_pack_capacity",
-            self.check_worker_to_pack_capacity,
-            shaq::mpmc::try_minimum_file_size::<CheckWorkerToPackMessage>,
-            PageSize::Huge,
-        )?;
+        if self.check_worker_count > 0 {
+            validate_queue_capacity(
+                "pack_to_check_worker_capacity",
+                self.pack_to_check_worker_capacity,
+                shaq::mpmc::try_minimum_file_size::<PackToCheckWorkerMessage>,
+                PageSize::Huge,
+            )?;
+            validate_queue_capacity(
+                "check_worker_to_pack_capacity",
+                self.check_worker_to_pack_capacity,
+                shaq::mpmc::try_minimum_file_size::<CheckWorkerToPackMessage>,
+                PageSize::Huge,
+            )?;
+        }
 
         Ok(())
     }
@@ -227,15 +244,20 @@ pub struct ClientSession {
     pub allocator: Allocator,
     pub tpu_to_pack: shaq::spsc::Consumer<TpuToPackMessage>,
     pub progress_tracker: shaq::spsc::Consumer<ProgressMessage>,
-    pub pack_to_check_worker: shaq::mpmc::Producer<PackToCheckWorkerMessage>,
-    pub check_worker_to_pack: shaq::mpmc::Consumer<CheckWorkerToPackMessage>,
     pub workers: Vec<ClientWorkerSession>,
+    pub check_workers: Option<ClientCheckWorkerSession>,
 }
 
 /// A per worker scheduling session.
 pub struct ClientWorkerSession {
     pub pack_to_worker: shaq::spsc::Producer<PackToExecutionWorkerMessage>,
     pub worker_to_pack: shaq::spsc::Consumer<ExecutionWorkerToPackMessage>,
+}
+
+/// The shared queue endpoints for the client's check workers.
+pub struct ClientCheckWorkerSession {
+    pub pack_to_check_worker: shaq::mpmc::Producer<PackToCheckWorkerMessage>,
+    pub check_worker_to_pack: shaq::mpmc::Consumer<CheckWorkerToPackMessage>,
 }
 
 /// Potential errors when creating both sides of a local scheduling session.
@@ -269,8 +291,8 @@ pub struct AgaveSession {
     pub flags: u64,
     pub tpu_to_pack: AgaveTpuToPackSession,
     pub progress_tracker: shaq::spsc::Producer<ProgressMessage>,
-    pub check_workers: Vec<AgaveCheckWorkerSession>,
     pub workers: Vec<AgaveWorkerSession>,
+    pub check_workers: Vec<AgaveCheckWorkerSession>,
 }
 
 /// Shared memory objects for the tpu to pack worker.

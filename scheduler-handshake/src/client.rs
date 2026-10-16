@@ -1,7 +1,8 @@
 use {
     crate::{
-        ClientHandshakeError, ClientLogon, ClientSession, ClientWorkerSession, ProtocolVersions,
-        shared::{LOGON_FAILURE, MAX_WORKERS},
+        ClientCheckWorkerSession, ClientHandshakeError, ClientLogon, ClientSession,
+        ClientWorkerSession, ProtocolVersions,
+        shared::{CHECK_SHMEM, GLOBAL_SHMEM, LOGON_FAILURE, MAX_WORKERS, WORKER_SHMEM},
     },
     agave_scheduler_bindings::{CheckWorkerToPackMessage, PackToCheckWorkerMessage},
     libc::CMSG_LEN,
@@ -19,15 +20,12 @@ use {
     },
 };
 
-/// Number of global shared memory objects (in addition to per worker objects).
-const GLOBAL_SHMEM: usize = 5;
-
 /// The maximum size in bytes of the control message containing the queues assuming [`MAX_WORKERS`]
 /// is respected.
 ///
 /// Each FD is 4 bytes so we simply multiply the number of shmem objects by 4 to get the control
 /// message buffer size.
-const CMSG_MAX_SIZE: usize = (GLOBAL_SHMEM + MAX_WORKERS * 2) * 4;
+const CMSG_MAX_SIZE: usize = (GLOBAL_SHMEM + MAX_WORKERS * WORKER_SHMEM + CHECK_SHMEM) * 4;
 
 /// Connects to the scheduler server on the given IPC path.
 ///
@@ -157,30 +155,39 @@ pub(crate) unsafe fn setup_session(
     logon: &ClientLogon,
     files: Vec<File>,
 ) -> Result<ClientSession, ClientHandshakeError> {
-    if files.len() < GLOBAL_SHMEM {
+    let expected_file_count = logon
+        .expected_file_count()
+        .ok_or(ClientHandshakeError::ProtocolViolation)?;
+    if files.len() != expected_file_count {
         return Err(ClientHandshakeError::ProtocolViolation);
     }
-    let (global_files, worker_files) = files.split_at(GLOBAL_SHMEM);
-    let [
-        allocator_file,
-        tpu_to_pack_file,
-        progress_tracker_file,
-        pack_to_check_worker_file,
-        check_worker_to_pack_file,
-    ] = global_files
-    else {
+
+    let (global_files, remaining_files) = files.split_at(GLOBAL_SHMEM);
+    let worker_file_count = logon
+        .worker_count
+        .checked_mul(WORKER_SHMEM)
+        .ok_or(ClientHandshakeError::ProtocolViolation)?;
+    let (worker_files, check_files) = remaining_files.split_at(worker_file_count);
+    let [allocator_file, tpu_to_pack_file, progress_tracker_file] = global_files else {
         unreachable!();
     };
 
     let allocator = Allocator::join(allocator_file)?;
 
-    // Ensure worker file count matches expectations.
-    if worker_files.is_empty()
-        || !worker_files.len().is_multiple_of(2)
-        || worker_files.len() / 2 != logon.worker_count
-    {
-        return Err(ClientHandshakeError::ProtocolViolation);
-    }
+    let check_workers = if let [request_file, response_file] = check_files {
+        Some(ClientCheckWorkerSession {
+            // SAFETY: the server initialized this FD as a matching MPMC consumer.
+            pack_to_check_worker: unsafe {
+                shaq::mpmc::Producer::<PackToCheckWorkerMessage>::join(request_file)?
+            },
+            // SAFETY: the server initialized this FD as a matching MPMC producer.
+            check_worker_to_pack: unsafe {
+                shaq::mpmc::Consumer::<CheckWorkerToPackMessage>::join(response_file)?
+            },
+        })
+    } else {
+        None
+    };
 
     // NB: After creating & mapping the queues we are fine to drop the files as mmap will keep the
     // underlying object alive until process exit or munmap.
@@ -188,14 +195,6 @@ pub(crate) unsafe fn setup_session(
         allocator,
         tpu_to_pack: unsafe { shaq::spsc::Consumer::join(tpu_to_pack_file)? },
         progress_tracker: unsafe { shaq::spsc::Consumer::join(progress_tracker_file)? },
-        // SAFETY: the server initialized this FD as a matching MPMC consumer.
-        pack_to_check_worker: unsafe {
-            shaq::mpmc::Producer::<PackToCheckWorkerMessage>::join(pack_to_check_worker_file)?
-        },
-        // SAFETY: the server initialized this FD as a matching MPMC producer.
-        check_worker_to_pack: unsafe {
-            shaq::mpmc::Consumer::<CheckWorkerToPackMessage>::join(check_worker_to_pack_file)?
-        },
         workers: worker_files
             .chunks(2)
             .map(|window| {
@@ -209,6 +208,7 @@ pub(crate) unsafe fn setup_session(
                 })
             })
             .collect::<Result<_, ClientHandshakeError>>()?,
+        check_workers,
     };
 
     // Drop the file handles now that mmaps are completed.
