@@ -220,7 +220,6 @@ fn message_passing_on_all_queues() {
                 progress_tracker_capacity: 256,
                 pack_to_worker_capacity: 1024,
                 worker_to_pack_capacity: 1024,
-                flags: 0,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
             },
@@ -325,12 +324,10 @@ fn local_session_message_passing_on_all_queues() {
         progress_tracker_capacity: 2,
         pack_to_worker_capacity: 2,
         worker_to_pack_capacity: 2,
-        flags: 21,
         pack_to_check_worker_capacity: 2,
         check_worker_to_pack_capacity: 2,
     };
     let (mut agave, mut client) = crate::setup_local_session(logon).unwrap();
-    assert_eq!(agave.flags, logon.flags);
     assert_eq!(agave.workers.len(), logon.worker_count);
     assert_eq!(client.workers.len(), logon.worker_count);
     assert_eq!(agave.check_workers.len(), logon.check_worker_count);
@@ -698,7 +695,6 @@ fn check_worker_queues_use_dedicated_capacities() {
         progress_tracker_capacity: 2,
         pack_to_worker_capacity: 2,
         worker_to_pack_capacity: 2,
-        flags: 0,
         pack_to_check_worker_capacity: CHECK_REQUEST_CAPACITY,
         check_worker_to_pack_capacity: CHECK_RESPONSE_CAPACITY,
     };
@@ -746,7 +742,6 @@ fn accept_worker_count_max() {
                 progress_tracker_capacity: 256,
                 pack_to_worker_capacity: 1024,
                 worker_to_pack_capacity: 1024,
-                flags: 0,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
             },
@@ -784,7 +779,6 @@ fn reject_worker_count_low() {
                 progress_tracker_capacity: 256,
                 pack_to_worker_capacity: 1024,
                 worker_to_pack_capacity: 1024,
-                flags: 0,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
             },
@@ -825,7 +819,6 @@ fn reject_worker_count_high() {
                 progress_tracker_capacity: 256,
                 pack_to_worker_capacity: 1024,
                 worker_to_pack_capacity: 1024,
-                flags: 0,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
             },
@@ -866,7 +859,6 @@ fn reject_check_worker_count_low() {
                 progress_tracker_capacity: 256,
                 pack_to_worker_capacity: 1024,
                 worker_to_pack_capacity: 1024,
-                flags: 0,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
             },
@@ -907,7 +899,6 @@ fn reject_check_worker_count_high() {
                 progress_tracker_capacity: 256,
                 pack_to_worker_capacity: 1024,
                 worker_to_pack_capacity: 1024,
-                flags: 0,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
             },
