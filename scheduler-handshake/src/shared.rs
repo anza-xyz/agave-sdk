@@ -15,8 +15,6 @@ pub const MAX_WORKERS: usize = 64;
 
 pub(crate) const LOGON_SUCCESS: u8 = 0x01;
 pub(crate) const LOGON_FAILURE: u8 = 0x02;
-pub(crate) const MAX_ALLOCATOR_HANDLES: usize = 128;
-pub(crate) const GLOBAL_ALLOCATORS: usize = 1;
 
 pub(crate) const STANDARD_PAGE_SIZE: usize = 4096;
 pub(crate) const HUGE_PAGE_SIZE: usize = 2 * 1024 * 1024;
@@ -124,6 +122,19 @@ pub struct ClientLogon {
 }
 
 impl ClientLogon {
+    pub(crate) fn allocator_count(&self) -> Option<u32> {
+        if self.allocator_handles == 0 {
+            return None;
+        }
+
+        // The TPU uses one handle, in addition to the worker and external process handles.
+        self.worker_count
+            .checked_add(self.check_worker_count)?
+            .checked_add(self.allocator_handles)?
+            .checked_add(1)
+            .and_then(|count| u32::try_from(count).ok())
+    }
+
     /// Validates counts and checks that allocator and queue sizes can be represented.
     ///
     /// Allocation can still fail if a size is too small or resources are unavailable.
@@ -138,11 +149,10 @@ impl ClientLogon {
             ));
         }
 
-        if !(1..=MAX_ALLOCATOR_HANDLES).contains(&self.allocator_handles) {
-            return Err(AgaveHandshakeError::AllocatorHandles(
+        self.allocator_count()
+            .ok_or(AgaveHandshakeError::AllocatorHandles(
                 self.allocator_handles,
-            ));
-        }
+            ))?;
 
         checked_file_size(self.allocator_size, PageSize::Huge)
             .ok_or(AgaveHandshakeError::AllocatorSize(self.allocator_size))?;
