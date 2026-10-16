@@ -146,7 +146,7 @@ impl Server {
 
         // Setup the allocator in shared memory (`worker_count`, `check_worker_count`, and
         // `allocator_handles` have been validated so this won't panic).
-        let (allocator_file, tpu_to_pack_allocator) = Self::create_allocator(&logon)?;
+        let (allocator_file, allocator) = Self::create_allocator(&logon)?;
 
         // Setup the global queues.
         let (tpu_to_pack_file, tpu_to_pack_queue) =
@@ -166,7 +166,7 @@ impl Server {
         let check_workers = (0..logon.check_worker_count)
             .map(|_| {
                 Ok(AgaveCheckWorkerSession {
-                    allocator: Allocator::join_from_existing(&tpu_to_pack_allocator)?,
+                    allocator: Allocator::join_from_existing(&allocator)?,
                     pack_to_check_worker: pack_to_check_worker.clone(),
                     check_worker_to_pack: check_worker_to_pack.clone(),
                 })
@@ -177,7 +177,7 @@ impl Server {
         let (worker_files, workers) = (0..logon.worker_count).try_fold(
             (Vec::default(), Vec::default()),
             |(mut fds, mut workers), _| {
-                let allocator = Allocator::join_from_existing(&tpu_to_pack_allocator)?;
+                let worker_allocator = Allocator::join_from_existing(&allocator)?;
 
                 let (pack_to_worker_file, pack_to_worker) =
                     Self::create_consumer(logon.pack_to_worker_capacity)?;
@@ -186,7 +186,7 @@ impl Server {
 
                 fds.extend([pack_to_worker_file, worker_to_pack_file]);
                 workers.push(AgaveWorkerSession {
-                    allocator,
+                    allocator: worker_allocator,
                     pack_to_worker,
                     worker_to_pack,
                 });
@@ -199,7 +199,7 @@ impl Server {
             AgaveSession {
                 flags: logon.flags,
                 tpu_to_pack: AgaveTpuToPackSession {
-                    allocator: tpu_to_pack_allocator,
+                    allocator,
                     producer: tpu_to_pack_queue,
                 },
                 progress_tracker,
