@@ -1681,9 +1681,9 @@ dependencies = [
 
 [[package]]
 name = "solana-reward-info"
-version = "7.0.0"
+version = "8.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d20f0760fe5f41208593d5111a13dff725a0b1af9986924c4a4ce5461520d0d"
+checksum = "42409af40290aa5f97981013e17e454271fda818d1b22e72f416136e089a6f81"
 
 [[package]]
 name = "solana-sanitize"
