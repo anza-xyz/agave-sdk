@@ -1,10 +1,15 @@
 use {
     crate::{
         ClientCheckWorkerSession, ClientHandshakeError, ClientLogon, ClientSession,
-        ClientWorkerSession, ProtocolVersions,
-        shared::{CHECK_SHMEM, GLOBAL_SHMEM, LOGON_FAILURE, MAX_WORKERS, WORKER_SHMEM},
+        ClientSimulateWorkerSession, ClientWorkerSession, ProtocolVersions,
+        shared::{
+            CHECK_SHMEM, GLOBAL_SHMEM, LOGON_FAILURE, MAX_WORKERS, SIMULATE_SHMEM, WORKER_SHMEM,
+        },
     },
-    agave_scheduler_bindings::{CheckWorkerToPackMessage, PackToCheckWorkerMessage},
+    agave_scheduler_bindings::{
+        CheckWorkerToPackMessage, ExecutionWorkerToPackMessage, PackToCheckWorkerMessage,
+        PackToExecutionWorkerMessage,
+    },
     libc::CMSG_LEN,
     nix::sys::socket::{self, ControlMessageOwned, MsgFlags, UnixAddr},
     rts_alloc::Allocator,
@@ -25,7 +30,8 @@ use {
 ///
 /// Each FD is 4 bytes so we simply multiply the number of shmem objects by 4 to get the control
 /// message buffer size.
-const CMSG_MAX_SIZE: usize = (GLOBAL_SHMEM + MAX_WORKERS * WORKER_SHMEM + CHECK_SHMEM) * 4;
+const CMSG_MAX_SIZE: usize =
+    (GLOBAL_SHMEM + MAX_WORKERS * WORKER_SHMEM + CHECK_SHMEM + SIMULATE_SHMEM) * 4;
 
 /// Connects to the scheduler server on the given IPC path.
 ///
@@ -167,7 +173,13 @@ pub(crate) unsafe fn setup_session(
         .worker_count
         .checked_mul(WORKER_SHMEM)
         .ok_or(ClientHandshakeError::ProtocolViolation)?;
-    let (worker_files, check_files) = remaining_files.split_at(worker_file_count);
+    let (worker_files, remaining_files) = remaining_files.split_at(worker_file_count);
+    let check_file_count = if logon.check_worker_count > 0 {
+        CHECK_SHMEM
+    } else {
+        0
+    };
+    let (check_files, simulate_files) = remaining_files.split_at(check_file_count);
     let [allocator_file, tpu_to_pack_file, progress_tracker_file] = global_files else {
         unreachable!();
     };
@@ -183,6 +195,21 @@ pub(crate) unsafe fn setup_session(
             // SAFETY: the server initialized this FD as a matching MPMC producer.
             check_worker_to_pack: unsafe {
                 shaq::mpmc::Consumer::<CheckWorkerToPackMessage>::join(response_file)?
+            },
+        })
+    } else {
+        None
+    };
+
+    let simulate_workers = if let [request_file, response_file] = simulate_files {
+        Some(ClientSimulateWorkerSession {
+            // SAFETY: the server initialized this FD as a matching MPMC consumer.
+            pack_to_simulate_worker: unsafe {
+                shaq::mpmc::Producer::<PackToExecutionWorkerMessage>::join(request_file)?
+            },
+            // SAFETY: the server initialized this FD as a matching MPMC producer.
+            simulate_worker_to_pack: unsafe {
+                shaq::mpmc::Consumer::<ExecutionWorkerToPackMessage>::join(response_file)?
             },
         })
     } else {
@@ -209,6 +236,7 @@ pub(crate) unsafe fn setup_session(
             })
             .collect::<Result<_, ClientHandshakeError>>()?,
         check_workers,
+        simulate_workers,
     };
 
     // Drop the file handles now that mmaps are completed.

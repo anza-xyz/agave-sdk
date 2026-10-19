@@ -1,13 +1,14 @@
 use {
     crate::{
-        AgaveCheckWorkerSession, AgaveHandshakeError, AgaveTpuToPackSession, AgaveWorkerSession,
-        ClientLogon, ProtocolVersions,
+        AgaveCheckWorkerSession, AgaveHandshakeError, AgaveSimulateWorkerSession,
+        AgaveTpuToPackSession, AgaveWorkerSession, ClientLogon, ProtocolVersions,
         shared::{
             AgaveSession, HUGE_PAGE_SIZE, LOGON_FAILURE, LOGON_SUCCESS, PageSize, checked_file_size,
         },
     },
     agave_scheduler_bindings::{
-        CheckWorkerToPackMessage, PackToCheckWorkerMessage, PackToExecutionWorkerMessage,
+        CheckWorkerToPackMessage, ExecutionWorkerToPackMessage, PackToCheckWorkerMessage,
+        PackToExecutionWorkerMessage,
     },
     nix::sys::socket::{self, ControlMessage, MsgFlags, UnixAddr},
     rts_alloc::Allocator,
@@ -143,8 +144,7 @@ impl Server {
     ) -> Result<(AgaveSession, Vec<File>), AgaveHandshakeError> {
         logon.validate()?;
 
-        // Setup the allocator in shared memory (`worker_count`, `check_worker_count`, and
-        // `allocator_handles` have been validated so this won't panic).
+        // Worker counts and allocator handles have been validated so this won't panic.
         let (allocator_file, allocator) = Self::create_allocator(&logon)?;
 
         // Setup the global queues.
@@ -197,6 +197,30 @@ impl Server {
             (vec![request_file, response_file], check_workers)
         };
 
+        let (simulate_files, simulate_workers) = if logon.simulate_worker_count == 0 {
+            (Vec::new(), Vec::new())
+        } else {
+            let (request_file, request_queue) =
+                Self::create_mpmc_consumer::<PackToExecutionWorkerMessage>(
+                    logon.pack_to_simulate_worker_capacity,
+                )?;
+            let (response_file, response_queue) =
+                Self::create_mpmc_producer::<ExecutionWorkerToPackMessage>(
+                    logon.simulate_worker_to_pack_capacity,
+                    PageSize::Huge,
+                )?;
+            let simulate_workers = (0..logon.simulate_worker_count)
+                .map(|_| {
+                    Ok(AgaveSimulateWorkerSession {
+                        allocator: Allocator::join_from_existing(&allocator)?,
+                        pack_to_simulate_worker: request_queue.clone(),
+                        simulate_worker_to_pack: response_queue.clone(),
+                    })
+                })
+                .collect::<Result<Vec<_>, AgaveHandshakeError>>()?;
+            (vec![request_file, response_file], simulate_workers)
+        };
+
         Ok((
             AgaveSession {
                 tpu_to_pack: AgaveTpuToPackSession {
@@ -206,11 +230,13 @@ impl Server {
                 progress_tracker,
                 workers,
                 check_workers,
+                simulate_workers,
             },
             [allocator_file, tpu_to_pack_file, progress_tracker_file]
                 .into_iter()
                 .chain(worker_files)
                 .chain(check_files)
+                .chain(simulate_files)
                 .collect(),
         ))
     }

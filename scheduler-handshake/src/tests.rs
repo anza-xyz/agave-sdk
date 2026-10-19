@@ -140,6 +140,7 @@ fn message_passing_on_all_queues() {
             .unwrap();
 
         assert_eq!(session.check_workers.len(), 2);
+        assert_eq!(session.simulate_workers.len(), 2);
 
         // Receive pack_to_check_worker messages.
         let mut check_messages = Vec::new();
@@ -174,6 +175,38 @@ fn message_passing_on_all_queues() {
                         ..check_worker_to_pack.batch
                     },
                     ..check_worker_to_pack
+                })
+                .unwrap();
+        }
+
+        // Both simulate workers consume the shared execution request queue.
+        let mut simulate_messages = Vec::new();
+        while simulate_messages.len() < session.simulate_workers.len() {
+            for worker in &session.simulate_workers {
+                if let Some(msg) = worker.pack_to_simulate_worker.try_read() {
+                    simulate_messages.push(msg);
+                }
+            }
+        }
+        assert_eq!(
+            simulate_messages,
+            vec![
+                pack_to_worker,
+                PackToExecutionWorkerMessage {
+                    max_working_slot: pack_to_worker.max_working_slot + 1,
+                    ..pack_to_worker
+                }
+            ]
+        );
+        for (i, worker) in session.simulate_workers.iter().enumerate() {
+            worker
+                .simulate_worker_to_pack
+                .try_write(ExecutionWorkerToPackMessage {
+                    batch: SharableTransactionBatchRegion {
+                        num_transactions: worker_to_pack.batch.num_transactions + i as u8,
+                        ..worker_to_pack.batch
+                    },
+                    ..worker_to_pack
                 })
                 .unwrap();
         }
@@ -214,6 +247,7 @@ fn message_passing_on_all_queues() {
             ClientLogon {
                 worker_count: 4,
                 check_worker_count: 2,
+                simulate_worker_count: 2,
                 allocator_size: 1024 * 1024 * 1024,
                 allocator_handles: 3,
                 tpu_to_pack_capacity: 65536,
@@ -222,6 +256,8 @@ fn message_passing_on_all_queues() {
                 worker_to_pack_capacity: 1024,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
+                pack_to_simulate_worker_capacity: 1024,
+                simulate_worker_to_pack_capacity: 1024,
             },
             Duration::from_secs(1),
         )
@@ -287,6 +323,44 @@ fn message_passing_on_all_queues() {
             ]
         );
 
+        for i in 0..2 {
+            session
+                .simulate_workers
+                .as_ref()
+                .unwrap()
+                .pack_to_simulate_worker
+                .try_write(PackToExecutionWorkerMessage {
+                    max_working_slot: pack_to_worker.max_working_slot + i,
+                    ..pack_to_worker
+                })
+                .unwrap();
+        }
+        let mut simulate_messages = Vec::new();
+        while simulate_messages.len() < 2 {
+            if let Some(msg) = session
+                .simulate_workers
+                .as_ref()
+                .unwrap()
+                .simulate_worker_to_pack
+                .try_read()
+            {
+                simulate_messages.push(msg);
+            }
+        }
+        assert_eq!(
+            simulate_messages,
+            vec![
+                worker_to_pack,
+                ExecutionWorkerToPackMessage {
+                    batch: SharableTransactionBatchRegion {
+                        num_transactions: worker_to_pack.batch.num_transactions + 1,
+                        ..worker_to_pack.batch
+                    },
+                    ..worker_to_pack
+                }
+            ]
+        );
+
         // Send pack_to_worker messages.
         for (i, worker) in session.workers.iter_mut().enumerate() {
             worker
@@ -327,6 +401,7 @@ fn local_session_message_passing_on_all_queues() {
     let logon = ClientLogon {
         worker_count: 2,
         check_worker_count: 2,
+        simulate_worker_count: 0,
         allocator_size: 64 * 1024 * 1024,
         allocator_handles: 1,
         tpu_to_pack_capacity: 2,
@@ -335,6 +410,8 @@ fn local_session_message_passing_on_all_queues() {
         worker_to_pack_capacity: 2,
         pack_to_check_worker_capacity: 2,
         check_worker_to_pack_capacity: 2,
+        pack_to_simulate_worker_capacity: 0,
+        simulate_worker_to_pack_capacity: 0,
     };
     let (mut agave, mut client) = crate::setup_local_session(logon).unwrap();
     assert_eq!(agave.workers.len(), logon.worker_count);
@@ -443,6 +520,7 @@ fn local_session_rejects_invalid_worker_count() {
         let result = crate::setup_local_session(ClientLogon {
             worker_count: count,
             check_worker_count: 1,
+            simulate_worker_count: 0,
             allocator_handles: 1,
             ..ClientLogon::default()
         });
@@ -459,6 +537,7 @@ fn local_session_rejects_invalid_check_worker_count() {
         let result = crate::setup_local_session(ClientLogon {
             worker_count: 1,
             check_worker_count: count,
+            simulate_worker_count: 0,
             allocator_handles: 1,
             ..ClientLogon::default()
         });
@@ -475,6 +554,7 @@ fn local_session_rejects_invalid_allocator_handles() {
         let result = crate::setup_local_session(ClientLogon {
             worker_count: 1,
             check_worker_count: 1,
+            simulate_worker_count: 0,
             allocator_handles: count,
             ..ClientLogon::default()
         });
@@ -491,6 +571,7 @@ fn setup_session_rejects_invalid_worker_counts() {
         let result = Server::setup_session(ClientLogon {
             worker_count: count,
             check_worker_count: 1,
+            simulate_worker_count: 0,
             allocator_handles: 1,
             ..ClientLogon::default()
         });
@@ -507,6 +588,7 @@ fn setup_session_rejects_invalid_check_worker_counts() {
         let result = Server::setup_session(ClientLogon {
             worker_count: 1,
             check_worker_count: count,
+            simulate_worker_count: 0,
             allocator_handles: 1,
             ..ClientLogon::default()
         });
@@ -518,11 +600,28 @@ fn setup_session_rejects_invalid_check_worker_counts() {
 }
 
 #[test]
+fn setup_session_rejects_invalid_simulate_worker_counts() {
+    for count in [MAX_WORKERS.checked_add(1).unwrap(), usize::MAX] {
+        let result = Server::setup_session(ClientLogon {
+            worker_count: 1,
+            simulate_worker_count: count,
+            allocator_handles: 1,
+            ..ClientLogon::default()
+        });
+        assert_matches!(
+            result.err(),
+            Some(AgaveHandshakeError::SimulateWorkerCount(actual)) if actual == count
+        );
+    }
+}
+
+#[test]
 fn setup_session_rejects_invalid_allocator_handles() {
     for count in [0, u32::MAX as usize - 2, usize::MAX] {
         let result = Server::setup_session(ClientLogon {
             worker_count: 1,
             check_worker_count: 1,
+            simulate_worker_count: 0,
             allocator_handles: count,
             ..ClientLogon::default()
         });
@@ -539,6 +638,7 @@ fn local_session_rejects_unrepresentable_allocator_sizes() {
         let result = crate::setup_local_session(ClientLogon {
             worker_count: 1,
             check_worker_count: 1,
+            simulate_worker_count: 0,
             allocator_handles: 1,
             allocator_size: size,
             ..ClientLogon::default()
@@ -555,6 +655,7 @@ fn local_session_rejects_unrepresentable_queue_capacities() {
     let logon = ClientLogon {
         worker_count: 1,
         check_worker_count: 1,
+        simulate_worker_count: 1,
         allocator_handles: 1,
         // An undersized allocator ensures queue validation happens before allocation.
         allocator_size: 0,
@@ -605,6 +706,20 @@ fn local_session_rejects_unrepresentable_queue_capacities() {
                     ..logon
                 },
             ),
+            (
+                "pack_to_simulate_worker_capacity",
+                ClientLogon {
+                    pack_to_simulate_worker_capacity: capacity,
+                    ..logon
+                },
+            ),
+            (
+                "simulate_worker_to_pack_capacity",
+                ClientLogon {
+                    simulate_worker_to_pack_capacity: capacity,
+                    ..logon
+                },
+            ),
         ] {
             let result = crate::setup_local_session(logon);
             let Err(SessionSetupError::Server(AgaveHandshakeError::QueueCapacity {
@@ -626,6 +741,7 @@ fn queue_payload_size_boundary_is_checked() {
     let logon = ClientLogon {
         worker_count: 1,
         check_worker_count: 1,
+        simulate_worker_count: 0,
         allocator_handles: 1,
         progress_tracker_capacity: (usize::MAX / core::mem::size_of::<ProgressMessage>())
             .checked_next_power_of_two()
@@ -668,6 +784,7 @@ fn reject_unrepresentable_sizes_over_socket() {
     let logon = ClientLogon {
         worker_count: 1,
         check_worker_count: 1,
+        simulate_worker_count: 0,
         allocator_handles: 1,
         ..ClientLogon::default()
     };
@@ -702,10 +819,13 @@ fn reject_unrepresentable_sizes_over_socket() {
 fn check_worker_queues_use_dedicated_capacities() {
     const CHECK_REQUEST_CAPACITY: usize = 1 << 18;
     const CHECK_RESPONSE_CAPACITY: usize = 1 << 19;
+    const SIMULATE_REQUEST_CAPACITY: usize = 1 << 17;
+    const SIMULATE_RESPONSE_CAPACITY: usize = 1 << 16;
 
     let logon = ClientLogon {
         worker_count: 1,
         check_worker_count: 1,
+        simulate_worker_count: 1,
         allocator_size: 64 * 1024 * 1024,
         allocator_handles: 1,
         tpu_to_pack_capacity: 2,
@@ -714,6 +834,8 @@ fn check_worker_queues_use_dedicated_capacities() {
         worker_to_pack_capacity: 2,
         pack_to_check_worker_capacity: CHECK_REQUEST_CAPACITY,
         check_worker_to_pack_capacity: CHECK_RESPONSE_CAPACITY,
+        pack_to_simulate_worker_capacity: SIMULATE_REQUEST_CAPACITY,
+        simulate_worker_to_pack_capacity: SIMULATE_RESPONSE_CAPACITY,
     };
     let (_agave, files) = Server::setup_session(logon).unwrap();
 
@@ -729,6 +851,25 @@ fn check_worker_queues_use_dedicated_capacities() {
             >= u64::try_from(shaq::mpmc::minimum_file_size::<CheckWorkerToPackMessage>(
                 CHECK_RESPONSE_CAPACITY
             ))
+            .unwrap()
+    );
+    assert_eq!(files.len(), 9);
+    assert!(
+        files[7].metadata().unwrap().len()
+            >= u64::try_from(
+                shaq::mpmc::minimum_file_size::<PackToExecutionWorkerMessage>(
+                    SIMULATE_REQUEST_CAPACITY
+                )
+            )
+            .unwrap()
+    );
+    assert!(
+        files[8].metadata().unwrap().len()
+            >= u64::try_from(
+                shaq::mpmc::minimum_file_size::<ExecutionWorkerToPackMessage>(
+                    SIMULATE_RESPONSE_CAPACITY
+                )
+            )
             .unwrap()
     );
 
@@ -753,6 +894,7 @@ fn accept_worker_count_max() {
             ClientLogon {
                 worker_count: MAX_WORKERS,
                 check_worker_count: 1,
+                simulate_worker_count: MAX_WORKERS,
                 allocator_size: 1024 * 1024 * 1024,
                 allocator_handles: 3,
                 tpu_to_pack_capacity: 65536,
@@ -761,6 +903,8 @@ fn accept_worker_count_max() {
                 worker_to_pack_capacity: 1024,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
+                pack_to_simulate_worker_capacity: 1024,
+                simulate_worker_to_pack_capacity: 1024,
             },
             Duration::from_secs(1),
         );
@@ -790,6 +934,7 @@ fn reject_worker_count_low() {
             ClientLogon {
                 worker_count: 0,
                 check_worker_count: 1,
+                simulate_worker_count: 0,
                 allocator_size: 1024 * 1024 * 1024,
                 allocator_handles: 3,
                 tpu_to_pack_capacity: 65536,
@@ -798,6 +943,8 @@ fn reject_worker_count_low() {
                 worker_to_pack_capacity: 1024,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
+                pack_to_simulate_worker_capacity: 0,
+                simulate_worker_to_pack_capacity: 0,
             },
             Duration::from_secs(1),
         );
@@ -830,6 +977,7 @@ fn reject_worker_count_high() {
             ClientLogon {
                 worker_count: 100,
                 check_worker_count: 1,
+                simulate_worker_count: 0,
                 allocator_size: 1024 * 1024 * 1024,
                 allocator_handles: 3,
                 tpu_to_pack_capacity: 65536,
@@ -838,6 +986,8 @@ fn reject_worker_count_high() {
                 worker_to_pack_capacity: 1024,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
+                pack_to_simulate_worker_capacity: 0,
+                simulate_worker_to_pack_capacity: 0,
             },
             Duration::from_secs(1),
         );
@@ -867,6 +1017,7 @@ fn accept_zero_check_workers() {
             ClientLogon {
                 worker_count: 1,
                 check_worker_count: 0,
+                simulate_worker_count: 0,
                 allocator_size: 1024 * 1024 * 1024,
                 allocator_handles: 3,
                 tpu_to_pack_capacity: 65536,
@@ -875,6 +1026,8 @@ fn accept_zero_check_workers() {
                 worker_to_pack_capacity: 1024,
                 pack_to_check_worker_capacity: usize::MAX,
                 check_worker_to_pack_capacity: usize::MAX,
+                pack_to_simulate_worker_capacity: 0,
+                simulate_worker_to_pack_capacity: 0,
             },
             Duration::from_secs(1),
         )
@@ -892,6 +1045,7 @@ fn zero_check_workers_have_no_queue_files() {
     let logon = ClientLogon {
         worker_count: 1,
         check_worker_count: 0,
+        simulate_worker_count: 0,
         allocator_size: 64 * 1024 * 1024,
         allocator_handles: 1,
         tpu_to_pack_capacity: 2,
@@ -900,13 +1054,42 @@ fn zero_check_workers_have_no_queue_files() {
         worker_to_pack_capacity: 2,
         pack_to_check_worker_capacity: usize::MAX,
         check_worker_to_pack_capacity: usize::MAX,
+        pack_to_simulate_worker_capacity: usize::MAX,
+        simulate_worker_to_pack_capacity: usize::MAX,
     };
     let (agave, files) = Server::setup_session(logon).unwrap();
     assert!(agave.check_workers.is_empty());
+    assert!(agave.simulate_workers.is_empty());
     assert_eq!(files.len(), 5);
     // SAFETY: Server setup initialized these files, and no client endpoints have been joined.
     let client = unsafe { crate::client::setup_session(&logon, files).unwrap() };
     assert!(client.check_workers.is_none());
+    assert!(client.simulate_workers.is_none());
+}
+
+#[test]
+fn simulate_workers_without_check_workers() {
+    let logon = ClientLogon {
+        worker_count: 1,
+        simulate_worker_count: 2,
+        allocator_size: 64 * 1024 * 1024,
+        allocator_handles: 1,
+        tpu_to_pack_capacity: 2,
+        progress_tracker_capacity: 2,
+        pack_to_worker_capacity: 2,
+        worker_to_pack_capacity: 2,
+        pack_to_simulate_worker_capacity: 2,
+        simulate_worker_to_pack_capacity: 2,
+        ..ClientLogon::default()
+    };
+    let (agave, files) = Server::setup_session(logon).unwrap();
+    assert!(agave.check_workers.is_empty());
+    assert_eq!(agave.simulate_workers.len(), 2);
+    assert_eq!(files.len(), 7);
+    // SAFETY: Server setup initialized these files, and no client endpoints have been joined.
+    let client = unsafe { crate::client::setup_session(&logon, files).unwrap() };
+    assert!(client.check_workers.is_none());
+    assert!(client.simulate_workers.is_some());
 }
 
 #[test]
@@ -928,6 +1111,7 @@ fn reject_check_worker_count_high() {
             ClientLogon {
                 worker_count: 1,
                 check_worker_count: 100,
+                simulate_worker_count: 0,
                 allocator_size: 1024 * 1024 * 1024,
                 allocator_handles: 3,
                 tpu_to_pack_capacity: 65536,
@@ -936,6 +1120,8 @@ fn reject_check_worker_count_high() {
                 worker_to_pack_capacity: 1024,
                 pack_to_check_worker_capacity: 1024,
                 check_worker_to_pack_capacity: 1024,
+                pack_to_simulate_worker_capacity: 0,
+                simulate_worker_to_pack_capacity: 0,
             },
             Duration::from_secs(1),
         );
