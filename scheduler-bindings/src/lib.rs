@@ -39,11 +39,13 @@
 //!   external scheduler process. This passes information about leader status
 //!   and slot progress to the external scheduler process.
 //! - [`PackToExecutionWorkerMessage`] are sent from the external scheduler process
-//!   to execution worker threads within agave. This passes a batch of
-//!   transactions to be executed by the worker threads.
-//! - [`ExecutionWorkerToPackMessage`] are sent from execution worker threads
-//!   within agave back to the external scheduler process. This passes back the
-//!   results of executing the transactions.
+//!   to execution or simulate worker threads within agave. Execution workers receive
+//!   them on per-worker SPSC queues; simulate workers receive them on a shared MPMC
+//!   queue. Each message carries a batch of transactions for that worker pool.
+//! - [`ExecutionWorkerToPackMessage`] are sent from execution or simulate workers
+//!   back to the external scheduler process on the corresponding response queue.
+//!   Each response carries the original batch, a processed code, and transaction
+//!   results when the batch was processed.
 //! - [`PackToCheckWorkerMessage`] are sent from the external scheduler process to
 //!   check worker threads within agave. This passes a batch of transactions to be
 //!   checked by the worker threads.
@@ -249,8 +251,10 @@ pub struct ProgressMessage {
 // transactions sent. This is a conservative bound.
 pub const MAX_TRANSACTIONS_PER_MESSAGE: usize = 64;
 
-/// Message: [Pack -> Execution Worker]
-/// External pack process passes transactions to execution worker threads within agave.
+/// Message: [Pack -> Execution or Simulate Worker]
+/// External pack process passes transactions to execution or simulate worker threads
+/// within agave. The two worker pools use separate queues; simulate workers share
+/// one MPMC request queue.
 ///
 /// These messages do not transfer ownership of the transactions.
 /// The external pack process is still responsible for freeing the memory.
@@ -339,8 +343,10 @@ pub mod processed_codes {
     pub const MAX_WORKING_SLOT_EXCEEDED: u8 = 2;
 }
 
-/// Message: [Execution Worker -> Pack]
-/// Message from worker threads in response to a [`PackToExecutionWorkerMessage`].
+/// Message: [Execution or Simulate Worker -> Pack]
+/// Message from an execution or simulate worker in response to a
+/// [`PackToExecutionWorkerMessage`]. The response uses the queue for the same worker pool
+/// as the request; simulate workers share one MPMC response queue.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(C)]
 pub struct ExecutionWorkerToPackMessage {
