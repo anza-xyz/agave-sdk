@@ -18,7 +18,7 @@ use {
 
 #[test]
 fn handshake_version_matches_crate_major() {
-    assert_eq!(crate::version(), 8);
+    assert_eq!(crate::version(), 9);
     assert_eq!(ProtocolVersions::current().handshake, crate::version());
 }
 
