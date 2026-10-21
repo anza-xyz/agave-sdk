@@ -18,7 +18,6 @@ rustdoc-args = ["--cfg=docsrs"]
 [features]
 
 [dependencies]
-bytes = { workspace = true }
 solana-hash = { workspace = true }
 solana-message = { workspace = true }
 solana-packet = { workspace = true }
@@ -32,6 +31,7 @@ solana-transaction = { workspace = true }
 [dev-dependencies]
 # See order-crates-for-publishing.py for using this unusual `path = "."`
 agave-transaction-view = { path = "." }
+bytes = { workspace = true }
 criterion = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }
