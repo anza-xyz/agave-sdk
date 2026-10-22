@@ -410,6 +410,9 @@ pub mod worker_message_types {
         /// Indicates if the transaction was included in the block or not.
         /// If [`not_included_reasons::NONE`], the transaction was included.
         pub not_included_reason: u8,
+        /// If included, whether the transaction succeeded.
+        /// See [`execution_statuses`] for details.
+        pub execution_status: u8,
         /// If included, cost units used by the transaction.
         pub cost_units: u64,
         /// If included, the fee-payer balance after execution, if the fee-payer is valid.
@@ -517,6 +520,16 @@ pub mod worker_message_types {
         // it is mapped into a scheduler-specific reason above.
         // /// Commit cancelled internally.
         // pub const COMMIT_CANCELLED: u8 = 102;
+    }
+
+    pub mod execution_statuses {
+        /// The transaction was not included, so it has no execution status.
+        pub const NOT_INCLUDED: u8 = 0;
+        /// The transaction executed successfully.
+        pub const SUCCESS: u8 = 1;
+        /// The transaction failed: an instruction errored, or it failed to load
+        /// its accounts and was included for its fee only.
+        pub const FAILED: u8 = 2;
     }
 
     pub mod parsing_and_sanitization_flags {
