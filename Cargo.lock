@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "agave-event-system"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "agave-event-system-derive",
  "getrandom 0.4.3",
