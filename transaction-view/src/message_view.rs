@@ -2,7 +2,7 @@ use {
     crate::{
         address_table_lookup_frame::AddressTableLookupIterator,
         instructions_frame::InstructionsIterator, message_frame::MessageFrame, result::Result,
-        sanitize::sanitize_message, transaction_config_frame::TransactionConfigView,
+        sanitize::sanitize_message, transaction_config_view::TransactionConfigView,
         transaction_version::TransactionVersion, transaction_view::TransactionView,
     },
     core::fmt::{Debug, Formatter},

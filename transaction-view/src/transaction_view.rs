@@ -3,7 +3,7 @@ use {
         address_table_lookup_frame::AddressTableLookupIterator,
         instructions_frame::InstructionsIterator, message_frame::MessageFrame,
         message_view::MessageViewRef, result::Result, sanitize::sanitize,
-        transaction_config_frame::TransactionConfigView, transaction_frame::TransactionFrame,
+        transaction_config_view::TransactionConfigView, transaction_frame::TransactionFrame,
         transaction_version::TransactionVersion,
     },
     core::fmt::{Debug, Formatter},

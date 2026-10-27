@@ -9,7 +9,7 @@ use {
         message_header_frame::MessageHeaderFrame,
         result::{Result, TransactionViewError},
         static_account_keys_frame::StaticAccountKeysFrame,
-        transaction_config_frame::TransactionConfigFrame,
+        transaction_config_view::TransactionConfigFrame,
         transaction_version::TransactionVersion,
     },
     solana_hash::Hash,
