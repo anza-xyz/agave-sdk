@@ -3,7 +3,7 @@ use {
         address_table_lookup_frame::AddressTableLookupIterator,
         instructions_frame::InstructionsIterator, message_frame::MessageFrame,
         message_view::MessageViewRef, result::Result, sanitize::sanitize,
-        transaction_config_frame::TransactionConfigView, transaction_frame::TransactionFrame,
+        transaction_config_view::TransactionConfigView, transaction_frame::TransactionFrame,
         transaction_version::TransactionVersion,
     },
     core::fmt::{Debug, Formatter},
@@ -223,6 +223,16 @@ impl<const SANITIZED: bool, D: AsRef<[u8]>> TransactionView<SANITIZED, D> {
     #[inline]
     pub(crate) fn message_frame(&self) -> &MessageFrame {
         &self.frame.message
+    }
+}
+
+impl<const SANITIZED: bool, D: AsRef<[u8]> + AsMut<[u8]>> TransactionView<SANITIZED, D> {
+    /// Replaces the recent_blockhash with provided hash.
+    /// This means signatures attached will no longer be valid.
+    pub fn set_recent_blockhash(&mut self, recent_blockhash: &Hash) {
+        let offset = usize::from(self.frame.message.recent_blockhash_offset());
+        self.data.as_mut()[offset..][..core::mem::size_of::<Hash>()]
+            .copy_from_slice(recent_blockhash.as_ref());
     }
 }
 
@@ -575,6 +585,21 @@ mod tests {
         assert_eq!(instructions[0].program_id_index, 1);
         assert_eq!(instructions[0].accounts, &[0]);
         assert_eq!(instructions[0].data, &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn test_set_recent_blockhash() {
+        for mut tx in [multiple_transfers(), simple_v1_transaction()] {
+            let bytes = wincode::serialize(&tx).unwrap();
+            let mut view = TransactionView::try_new_sanitized(bytes).unwrap();
+
+            let recent_blockhash = Hash::new_from_array([7; 32]);
+            view.set_recent_blockhash(&recent_blockhash);
+            assert_eq!(view.recent_blockhash(), &recent_blockhash);
+
+            tx.message.set_recent_blockhash(recent_blockhash);
+            assert_eq!(view.data(), wincode::serialize(&tx).unwrap().as_slice());
+        }
     }
 
     fn append_trailing_bytes(transaction_bytes: &[u8]) -> Vec<u8> {
