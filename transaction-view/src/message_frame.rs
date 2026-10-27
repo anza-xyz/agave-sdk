@@ -233,6 +233,12 @@ impl MessageFrame {
         (self.message_header.offset, self.end_offset)
     }
 
+    /// Return the offset of the recent blockhash.
+    #[inline]
+    pub(crate) fn recent_blockhash_offset(&self) -> u16 {
+        self.recent_blockhash_offset
+    }
+
     /// Return the offset one past the last byte of the message.
     #[inline]
     pub(crate) fn end_offset(&self) -> u16 {
