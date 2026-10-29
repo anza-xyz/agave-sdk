@@ -44,7 +44,7 @@ nix = "0.31.3"
 proc-macro-crate = "3.5.0"
 proc-macro2 = "1.0.106"
 quote = "1.0.46"
-rstest = "0.27.0"
+rstest = "0.28.0"
 rts-alloc = "5.1.0"
 shaq = "5.0.0"
 solana-bls-signatures = { version = "4.0.0", features = ["serde"] }
