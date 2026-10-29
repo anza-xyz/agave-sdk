@@ -122,6 +122,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "940b3a0ca603d1eade50a4846a2afffd5ef57a9feac2c0e2ec2e14f9ead76000"
 
 [[package]]
+name = "anza-blstrs"
+version = "0.7.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8a69a28fa945b11b8e1c16d00dbd675bf9aaa16202afc0771fad3e2890077125"
+dependencies = [
+ "blst",
+ "byte-slice-cast",
+ "ff",
+ "group",
+ "pairing",
+ "rand_core 0.6.4",
+ "serde",
+ "subtle",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -179,22 +195,6 @@ dependencies = [
  "glob",
  "threadpool",
  "zeroize",
-]
-
-[[package]]
-name = "blstrs"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a8a8ed6fefbeef4a8c7b460e4110e12c5e22a5b7cf32621aae6ad650c4dcf29"
-dependencies = [
- "blst",
- "byte-slice-cast",
- "ff",
- "group",
- "pairing",
- "rand_core 0.6.4",
- "serde",
- "subtle",
 ]
 
 [[package]]
@@ -1505,13 +1505,13 @@ dependencies = [
 
 [[package]]
 name = "solana-bls-signatures"
-version = "4.0.1"
+version = "4.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f7228c72fd3c1a4821c719e3b8caa60c0db155694a2eee84fc80007423542bf7"
+checksum = "a38a9005b7cdc84aa3caaf03babfc4b48901549a1c7867d12bc9cfde38da6de4"
 dependencies = [
+ "anza-blstrs",
  "base64",
  "blst",
- "blstrs",
  "cfg_eval",
  "ff",
  "group",
