@@ -174,7 +174,7 @@ where
     }
 
     /// Returns a borrowed view of the resolved addresses.
-    fn loaded_addresses_view(&self) -> Option<LoadedAddressesView<'_>> {
+    pub fn loaded_addresses_view(&self) -> Option<LoadedAddressesView<'_>> {
         self.resolved_addresses
             .as_ref()
             .map(LoadedAddressesView::from)
