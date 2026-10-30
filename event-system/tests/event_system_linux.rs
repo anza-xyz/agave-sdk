@@ -12,7 +12,10 @@ use {
             self, AvailableStream, DecodedMessage, TryConnectError, TryConnectTypedError,
         },
     },
-    common::{TEST_CONFIG, TEST_STREAM_NAME, TestEnumEvent, TestEvent, assert_is_empty},
+    common::{
+        TEST_CONFIG, TEST_EVENT, TEST_STREAM_NAME, TestEnumEvent, TestEvent, assert_is_empty,
+        assert_received,
+    },
     rstest::rstest,
     std::assert_matches,
     tempfile::TempDir,
@@ -34,18 +37,90 @@ fn create_event_system_fails_when_path_is_a_file() {
 }
 
 #[test]
-fn create_event_system_reuses_directory_only_after_drop() {
+fn create_event_system_fails_when_directory_is_not_an_event_system_directory() {
     let directory = TempDir::new().unwrap();
-    let path = directory.path();
+    std::fs::create_dir(directory.path().join("unrelated")).unwrap();
 
-    let event_system = EventSystem::new(path).unwrap();
+    assert_matches!(EventSystem::new(directory.path()), Err(_));
+}
 
-    let event_system_with_reused_path_result = EventSystem::new(path);
-    assert_matches!(event_system_with_reused_path_result, Err(_));
+#[test]
+fn event_systems_can_share_a_directory() {
+    const FIRST_STREAM_NAME: StreamName = agave_event_system::stream_name!("first-stream");
+    const SECOND_STREAM_NAME: StreamName = agave_event_system::stream_name!("second-stream");
 
-    drop(event_system);
-    let _event_system =
-        EventSystem::new(path).expect("the path can be reused after the event system is dropped");
+    let directory = TempDir::new().unwrap();
+    let event_system_path = directory.path().join("event-system");
+
+    let first_event_system = EventSystem::new(&event_system_path).unwrap();
+    let second_event_system = EventSystem::new(&event_system_path).unwrap();
+
+    first_event_system.set_stream_policy("on".parse().unwrap());
+    second_event_system.set_stream_policy("on".parse().unwrap());
+
+    let first_publisher_factory = first_event_system
+        .create_stream::<TestEvent>(FIRST_STREAM_NAME, TEST_CONFIG)
+        .unwrap();
+    let second_publisher_factory = second_event_system
+        .create_stream::<TestEvent>(SECOND_STREAM_NAME, TEST_CONFIG)
+        .unwrap();
+
+    let mut second_publisher = second_publisher_factory.try_create_publisher().unwrap();
+
+    let explorer = subscriber::StreamExplorer::new(event_system_path);
+    assert_eq!(explorer.available_streams().count(), 2);
+
+    drop(first_publisher_factory);
+    drop(first_event_system);
+
+    let mut available_streams: Vec<AvailableStream> = explorer.available_streams().collect();
+    assert_eq!(
+        available_streams.len(),
+        1,
+        "only the first event system's stream is removed"
+    );
+    let mut subscriber = available_streams
+        .pop()
+        .unwrap()
+        .try_connect_typed::<TestEvent>()
+        .unwrap();
+    assert_eq!(&SECOND_STREAM_NAME, subscriber.stream_name());
+
+    second_publisher.publish(&TEST_EVENT).unwrap();
+    assert_received([&mut subscriber]);
+}
+
+#[test]
+fn stream_name_is_reserved_across_event_systems_until_dropped() {
+    let directory = TempDir::new().unwrap();
+    let first_event_system = EventSystem::new(directory.path()).unwrap();
+    let second_event_system = EventSystem::new(directory.path()).unwrap();
+
+    let first_publisher_factory = first_event_system
+        .create_stream::<TestEvent>(TEST_STREAM_NAME, TEST_CONFIG)
+        .unwrap();
+    let first_publisher = first_publisher_factory.try_create_publisher().unwrap();
+
+    assert_matches!(
+        second_event_system.create_stream::<TestEvent>(TEST_STREAM_NAME, TEST_CONFIG),
+        Err(CreateStreamError::StreamNameAlreadyInUse)
+    );
+
+    drop(first_publisher_factory);
+
+    assert_matches!(
+        second_event_system.create_stream::<TestEvent>(TEST_STREAM_NAME, TEST_CONFIG),
+        Err(CreateStreamError::StreamNameAlreadyInUse)
+    );
+
+    drop(first_publisher);
+
+    assert_matches!(
+        second_event_system.create_stream::<TestEvent>(TEST_STREAM_NAME, TEST_CONFIG),
+        Ok(_),
+        "the first event system's stream should no longer be reserving the name after dropping \
+         both its publisher factory and its publisher"
+    );
 }
 
 #[test]
