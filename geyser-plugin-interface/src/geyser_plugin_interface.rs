@@ -547,7 +547,7 @@ pub enum SlotStatus {
     /// A new bank fork is created with the slot
     CreatedBank,
 
-    /// A slot is marked dead
+    /// A bank is marked dead. A replacement bank at the same slot may still succeed.
     Dead(String),
 }
 
@@ -665,11 +665,32 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
         Ok(())
     }
 
+    /// Called when construction of a bank begins, before any other notification carrying
+    /// its `bank_id`. `parent` is the parent slot, or `None` for the genesis bank.
+    /// This includes banks restored from snapshots and banks replayed at startup.
+    ///
+    /// The ordering applies to plugins loaded when construction begins. Notifications for
+    /// different banks may interleave. A plugin loaded or reloaded later can receive bank
+    /// notifications without this callback. Snapshot account notifications have no bank ID
+    /// and may precede it.
+    ///
+    /// Construction may fail after this callback. It does not replace `CreatedBank`, which
+    /// retains its existing timing after construction in live replay. The default is a no-op.
+    #[allow(unused_variables)]
+    fn notify_bank_creation(
+        &self,
+        slot: Slot,
+        parent: Option<Slot>,
+        bank_id: BankId,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     /// Called when a slot status is updated.
     ///
     /// The validator calls this directly for statuses that are not associated
-    /// with a concrete bank instance: `FirstShredReceived`, `Completed`, and
-    /// `Dead`.
+    /// with a concrete bank instance: `FirstShredReceived` and `Completed`.
+    /// The default implementation of `update_bank_status` also forwards here.
     #[allow(unused_variables)]
     fn update_slot_status(
         &self,
@@ -684,7 +705,9 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
     ///
     /// `bank_id` identifies the concrete bank instance associated with this
     /// status update. This method is called for statuses tied to a particular
-    /// `Bank`: `Confirmed`, `Processed`, `Rooted`, and `CreatedBank`.
+    /// `Bank`: `Confirmed`, `Processed`, `Rooted`, `CreatedBank`, and `Dead`.
+    /// By default, this forwards to `update_slot_status` once. Plugins overriding
+    /// this method are responsible for handling these statuses themselves.
     #[allow(unused_variables)]
     fn update_bank_status(
         &self,
@@ -925,5 +948,40 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
         update_parent: ReplicaDeshredUpdateParentInfoVersions,
     ) -> Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::*, std::sync::Mutex};
+
+    #[derive(Debug, Default)]
+    struct LegacyPlugin(Mutex<Vec<SlotStatus>>);
+
+    impl GeyserPlugin for LegacyPlugin {
+        fn name(&self) -> &'static str {
+            "legacy"
+        }
+
+        fn update_slot_status(
+            &self,
+            _slot: Slot,
+            _parent: Option<Slot>,
+            status: &SlotStatus,
+        ) -> Result<()> {
+            self.0.lock().unwrap().push(status.clone());
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_legacy_bank_callbacks() {
+        let plugin = LegacyPlugin::default();
+        plugin.notify_bank_creation(42, Some(41), 7).unwrap();
+        assert!(plugin.0.lock().unwrap().is_empty());
+
+        let dead = SlotStatus::Dead("replay failed".to_owned());
+        plugin.update_bank_status(42, Some(41), &dead, 7).unwrap();
+        assert_eq!(*plugin.0.lock().unwrap(), [dead]);
     }
 }
