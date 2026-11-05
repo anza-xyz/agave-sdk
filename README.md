@@ -8,6 +8,9 @@ This repository is for core-development-facing components that are useful
 outside the agave validator codebase. For general Solana SDK types and on-chain
 program interfaces, see [`solana-sdk`](https://github.com/anza-xyz/solana-sdk).
 
+For Geyser plugin builds, see the [Agave version mapping and build
+requirements](geyser-plugin-interface/README.md#agave-versions).
+
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
