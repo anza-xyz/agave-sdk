@@ -145,7 +145,7 @@ pub struct ReplicaAccountInfoV4<'a> {
     /// Reference to transaction causing this account modification
     pub txn: Option<&'a SanitizedTransaction>,
 
-    /// Block index of the causing transaction (as `ReplicaTransactionInfoV4::index`); `None` if no transaction caused it, or if one did but the validator wasn't tracking indices
+    /// Block index of the causing transaction (as `ReplicaTransactionInfoV5::index`); `None` if no transaction caused it, or if one did but the validator wasn't tracking indices
     pub txn_index: Option<usize>,
 }
 
@@ -164,15 +164,12 @@ pub enum ReplicaAccountInfoVersions<'a> {
 /// Information about a transaction, including index in block
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub struct ReplicaTransactionInfoV4<'a> {
+pub struct ReplicaTransactionInfoV5<'a> {
     /// The transaction signature, used for identifying the transaction.
     pub signature: &'a Signature,
 
     /// The transaction message hash, used for identifying the transaction.
     pub message_hash: &'a Hash,
-
-    /// Indicates if the transaction is a simple vote transaction.
-    pub is_vote: bool,
 
     /// The versioned transaction.
     pub transaction: &'a VersionedTransaction,
@@ -191,26 +188,26 @@ pub struct ReplicaTransactionInfoV4<'a> {
 ///
 /// `V0_0_1` through `V0_0_3` carried
 /// `solana_transaction_status::TransactionStatusMeta` and shipped through
-/// v4.3; they were removed when the payload became the
-/// `transaction_status_meta` mirror types. The explicit discriminant keeps
-/// the formats distinguishable across plugin builds.
+/// Agave v4.3. `V0_0_4` used the `transaction_status_meta` mirror types and
+/// included the TowerBFT `is_vote` flag. The explicit discriminant keeps the
+/// new payload distinguishable from those earlier formats.
 #[repr(u32)]
 pub enum ReplicaTransactionInfoVersions<'a> {
-    V0_0_4(&'a ReplicaTransactionInfoV4<'a>) = 3,
+    V0_0_5(&'a ReplicaTransactionInfoV5<'a>) = 4,
 }
 
-/// Information about a transaction after deshredding (when entries are formed from shreds).
-/// This is sent before any execution occurs.
-/// Unlike ReplicaTransactionInfo, this does not include TransactionStatusMeta
-/// since execution has not happened yet.
+/// Information about a transaction after deshredding, before execution, including
+/// metadata about the completed data set that produced it.
+///
+/// A completed data set is a contiguous range of data shreds whose combined payload deserializes
+/// to a single `Vec<Entry>`. Multiple transactions can share the same completed-data-set range,
+/// and completed data sets for the same slot may be observed out of order. These fields describe
+/// the data-set container; they are not a block-wide transaction index.
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub struct ReplicaDeshredTransactionInfo<'a> {
+pub struct ReplicaDeshredTransactionInfoV3<'a> {
     /// The transaction signature, used for identifying the transaction.
     pub signature: &'a Signature,
-
-    /// Indicates if the transaction is a simple vote transaction.
-    pub is_vote: bool,
 
     /// The versioned transaction.
     pub transaction: &'a VersionedTransaction,
@@ -222,29 +219,6 @@ pub struct ReplicaDeshredTransactionInfo<'a> {
     /// when ALT resolution is not enabled by the plugin, or when resolution fails
     /// (e.g. the lookup table account does not exist at the root slot).
     pub loaded_addresses: Option<&'a LoadedAddresses>,
-}
-
-/// Extends ReplicaDeshredTransactionInfo with metadata about the completed data set that
-/// produced the transaction.
-///
-/// A completed data set is a contiguous range of data shreds whose combined payload deserializes
-/// to a single `Vec<Entry>`. Multiple transactions can share the same completed-data-set range,
-/// and completed data sets for the same slot may be observed out of order. These fields describe
-/// the data-set container; they are not a block-wide transaction index.
-#[derive(Clone, Debug)]
-#[repr(C)]
-pub struct ReplicaDeshredTransactionInfoV2<'a> {
-    /// The transaction signature, used for identifying the transaction.
-    pub signature: &'a Signature,
-
-    /// Indicates if the transaction is a simple vote transaction.
-    pub is_vote: bool,
-
-    /// The versioned transaction.
-    pub transaction: &'a VersionedTransaction,
-
-    /// Addresses loaded from address lookup tables for V0 transactions.
-    pub loaded_addresses: Option<&'a LoadedAddresses>,
 
     /// The inclusive starting shred index of the completed data set containing this transaction.
     pub completed_data_set_starting_shred_index: u32,
@@ -254,10 +228,12 @@ pub struct ReplicaDeshredTransactionInfoV2<'a> {
 }
 
 /// A wrapper to future-proof ReplicaDeshredTransactionInfo handling.
+///
+/// `V0_0_1` and `V0_0_2` included the TowerBFT `is_vote` flag. The explicit
+/// discriminant keeps this payload distinguishable from those earlier formats.
 #[repr(u32)]
 pub enum ReplicaDeshredTransactionInfoVersions<'a> {
-    V0_0_1(&'a ReplicaDeshredTransactionInfo<'a>),
-    V0_0_2(&'a ReplicaDeshredTransactionInfoV2<'a>),
+    V0_0_3(&'a ReplicaDeshredTransactionInfoV3<'a>) = 2,
 }
 
 #[derive(Clone, Debug)]
@@ -921,7 +897,7 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
     /// Check if the plugin wants address lookup table (ALT) resolution for
     /// deshred transactions. Default is false. When true, the validator will
     /// resolve V0 transaction address lookups using the rooted bank and
-    /// populate `loaded_addresses` in `ReplicaDeshredTransactionInfo`.
+    /// populate `loaded_addresses` in `ReplicaDeshredTransactionInfoV3`.
     /// This adds accounts DB I/O on the shred insertion path, so plugins
     /// that only need the raw transaction should leave this disabled.
     fn deshred_transaction_alt_resolution_enabled(&self) -> bool {
