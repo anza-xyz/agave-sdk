@@ -164,6 +164,29 @@ pub enum ReplicaAccountInfoVersions<'a> {
 /// Information about a transaction, including index in block
 #[derive(Clone, Debug)]
 #[repr(C)]
+pub struct ReplicaTransactionInfoV4<'a> {
+    /// The transaction signature, used for identifying the transaction.
+    pub signature: &'a Signature,
+
+    /// The transaction message hash, used for identifying the transaction.
+    pub message_hash: &'a Hash,
+
+    /// Indicates if the transaction is a simple vote transaction.
+    pub is_vote: bool,
+
+    /// The versioned transaction.
+    pub transaction: &'a VersionedTransaction,
+
+    /// Metadata of the transaction status.
+    pub transaction_status_meta: &'a TransactionStatusMeta<'a>,
+
+    /// The transaction's index in the block
+    pub index: usize,
+}
+
+/// Information about a transaction without the legacy TowerBFT vote flag
+#[derive(Clone, Debug)]
+#[repr(C)]
 pub struct ReplicaTransactionInfoV5<'a> {
     /// The transaction signature, used for identifying the transaction.
     pub signature: &'a Signature,
@@ -188,12 +211,67 @@ pub struct ReplicaTransactionInfoV5<'a> {
 ///
 /// `V0_0_1` through `V0_0_3` carried
 /// `solana_transaction_status::TransactionStatusMeta` and shipped through
-/// Agave v4.3. `V0_0_4` used the `transaction_status_meta` mirror types and
-/// included the TowerBFT `is_vote` flag. The explicit discriminant keeps the
-/// new payload distinguishable from those earlier formats.
+/// Agave v4.3. They were removed when the payload switched to the
+/// `transaction_status_meta` mirror types. `V0_0_4` retains the legacy TowerBFT
+/// vote flag. `V0_0_5` omits it. The discriminants distinguish these formats.
 #[repr(u32)]
 pub enum ReplicaTransactionInfoVersions<'a> {
+    V0_0_4(&'a ReplicaTransactionInfoV4<'a>) = 3,
     V0_0_5(&'a ReplicaTransactionInfoV5<'a>) = 4,
+}
+
+/// Information about a transaction after deshredding (when entries are formed from shreds).
+/// This is sent before any execution occurs.
+/// Unlike ReplicaTransactionInfo, this does not include TransactionStatusMeta
+/// since execution has not happened yet.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct ReplicaDeshredTransactionInfo<'a> {
+    /// The transaction signature, used for identifying the transaction.
+    pub signature: &'a Signature,
+
+    /// Indicates if the transaction is a simple vote transaction.
+    pub is_vote: bool,
+
+    /// The versioned transaction.
+    pub transaction: &'a VersionedTransaction,
+
+    /// Addresses loaded from address lookup tables for V0 transactions.
+    /// Resolution uses the rooted bank, so address lookup tables created between
+    /// the root slot and the current slot will not resolve. This field is `None`
+    /// for legacy transactions, when the transaction has no address table lookups,
+    /// when ALT resolution is not enabled by the plugin, or when resolution fails
+    /// (e.g. the lookup table account does not exist at the root slot).
+    pub loaded_addresses: Option<&'a LoadedAddresses>,
+}
+
+/// Extends ReplicaDeshredTransactionInfo with metadata about the completed data set that
+/// produced the transaction.
+///
+/// A completed data set is a contiguous range of data shreds whose combined payload deserializes
+/// to a single `Vec<Entry>`. Multiple transactions can share the same completed-data-set range,
+/// and completed data sets for the same slot may be observed out of order. These fields describe
+/// the data-set container; they are not a block-wide transaction index.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct ReplicaDeshredTransactionInfoV2<'a> {
+    /// The transaction signature, used for identifying the transaction.
+    pub signature: &'a Signature,
+
+    /// Indicates if the transaction is a simple vote transaction.
+    pub is_vote: bool,
+
+    /// The versioned transaction.
+    pub transaction: &'a VersionedTransaction,
+
+    /// Addresses loaded from address lookup tables for V0 transactions.
+    pub loaded_addresses: Option<&'a LoadedAddresses>,
+
+    /// The inclusive starting shred index of the completed data set containing this transaction.
+    pub completed_data_set_starting_shred_index: u32,
+
+    /// The exclusive ending shred index of the completed data set containing this transaction.
+    pub completed_data_set_ending_shred_index_exclusive: u32,
 }
 
 /// Information about a transaction after deshredding, before execution, including
@@ -229,10 +307,11 @@ pub struct ReplicaDeshredTransactionInfoV3<'a> {
 
 /// A wrapper to future-proof ReplicaDeshredTransactionInfo handling.
 ///
-/// `V0_0_1` and `V0_0_2` included the TowerBFT `is_vote` flag. The explicit
-/// discriminant keeps this payload distinguishable from those earlier formats.
+/// `V0_0_1` and `V0_0_2` retain the legacy TowerBFT vote flag. `V0_0_3` omits it.
 #[repr(u32)]
 pub enum ReplicaDeshredTransactionInfoVersions<'a> {
+    V0_0_1(&'a ReplicaDeshredTransactionInfo<'a>) = 0,
+    V0_0_2(&'a ReplicaDeshredTransactionInfoV2<'a>) = 1,
     V0_0_3(&'a ReplicaDeshredTransactionInfoV3<'a>) = 2,
 }
 
