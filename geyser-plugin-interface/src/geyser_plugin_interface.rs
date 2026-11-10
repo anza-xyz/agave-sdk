@@ -145,7 +145,7 @@ pub struct ReplicaAccountInfoV4<'a> {
     /// Reference to transaction causing this account modification
     pub txn: Option<&'a SanitizedTransaction>,
 
-    /// Block index of the causing transaction (as `ReplicaTransactionInfoV5::index`); `None` if no transaction caused it, or if one did but the validator wasn't tracking indices
+    /// Block index of the causing transaction (as `ReplicaTransactionInfoV4::index`); `None` if no transaction caused it, or if one did but the validator wasn't tracking indices
     pub txn_index: Option<usize>,
 }
 
@@ -178,7 +178,7 @@ pub struct ReplicaAccountInfoV5<'a> {
     /// Reference to transaction causing this account modification
     pub txn: Option<&'a SanitizedTransaction>,
 
-    /// Block index of the causing transaction (as `ReplicaTransactionInfoV4::index`); `None` if no transaction caused it, or if one did but the validator wasn't tracking indices
+    /// Block index of the causing transaction (as `ReplicaTransactionInfoV5::index`); `None` if no transaction caused it, or if one did but the validator wasn't tracking indices
     pub txn_index: Option<usize>,
 }
 
@@ -218,7 +218,7 @@ pub struct ReplicaTransactionInfoV4<'a> {
     pub index: usize,
 }
 
-/// Information about a transaction without the legacy TowerBFT vote flag
+/// Information about a transaction
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub struct ReplicaTransactionInfoV5<'a> {
