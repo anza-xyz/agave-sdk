@@ -178,7 +178,7 @@ pub struct ReplicaAccountInfoV5<'a> {
     /// Reference to transaction causing this account modification
     pub txn: Option<&'a SanitizedTransaction>,
 
-    /// Block index of the causing transaction (as `ReplicaTransactionInfoV4::index`); `None` if no transaction caused it, or if one did but the validator wasn't tracking indices
+    /// Block index of the causing transaction (as `ReplicaTransactionInfoV5::index`); `None` if no transaction caused it, or if one did but the validator wasn't tracking indices
     pub txn_index: Option<usize>,
 }
 
@@ -218,6 +218,26 @@ pub struct ReplicaTransactionInfoV4<'a> {
     pub index: usize,
 }
 
+/// Information about a transaction
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct ReplicaTransactionInfoV5<'a> {
+    /// The transaction signature, used for identifying the transaction.
+    pub signature: &'a Signature,
+
+    /// The transaction message hash, used for identifying the transaction.
+    pub message_hash: &'a Hash,
+
+    /// The versioned transaction.
+    pub transaction: &'a VersionedTransaction,
+
+    /// Metadata of the transaction status.
+    pub transaction_status_meta: &'a TransactionStatusMeta<'a>,
+
+    /// The transaction's index in the block
+    pub index: usize,
+}
+
 /// A wrapper to future-proof ReplicaTransactionInfo handling.
 /// If there were a change to the structure of ReplicaTransactionInfo,
 /// there would be new enum entry for the newer version, forcing
@@ -225,12 +245,13 @@ pub struct ReplicaTransactionInfoV4<'a> {
 ///
 /// `V0_0_1` through `V0_0_3` carried
 /// `solana_transaction_status::TransactionStatusMeta` and shipped through
-/// v4.3; they were removed when the payload became the
-/// `transaction_status_meta` mirror types. The explicit discriminant keeps
-/// the formats distinguishable across plugin builds.
+/// Agave v4.3. They were removed when the payload switched to the
+/// `transaction_status_meta` mirror types. `V0_0_4` retains the legacy TowerBFT
+/// vote flag. `V0_0_5` omits it. The discriminants distinguish these formats.
 #[repr(u32)]
 pub enum ReplicaTransactionInfoVersions<'a> {
     V0_0_4(&'a ReplicaTransactionInfoV4<'a>) = 3,
+    V0_0_5(&'a ReplicaTransactionInfoV5<'a>) = 4,
 }
 
 /// Information about a transaction after deshredding (when entries are formed from shreds).
@@ -287,11 +308,45 @@ pub struct ReplicaDeshredTransactionInfoV2<'a> {
     pub completed_data_set_ending_shred_index_exclusive: u32,
 }
 
+/// Information about a transaction after deshredding, before execution, including
+/// metadata about the completed data set that produced it.
+///
+/// A completed data set is a contiguous range of data shreds whose combined payload deserializes
+/// to a single `Vec<Entry>`. Multiple transactions can share the same completed-data-set range,
+/// and completed data sets for the same slot may be observed out of order. These fields describe
+/// the data-set container; they are not a block-wide transaction index.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct ReplicaDeshredTransactionInfoV3<'a> {
+    /// The transaction signature, used for identifying the transaction.
+    pub signature: &'a Signature,
+
+    /// The versioned transaction.
+    pub transaction: &'a VersionedTransaction,
+
+    /// Addresses loaded from address lookup tables for V0 transactions.
+    /// Resolution uses the rooted bank, so address lookup tables created between
+    /// the root slot and the current slot will not resolve. This field is `None`
+    /// for legacy transactions, when the transaction has no address table lookups,
+    /// when ALT resolution is not enabled by the plugin, or when resolution fails
+    /// (e.g. the lookup table account does not exist at the root slot).
+    pub loaded_addresses: Option<&'a LoadedAddresses>,
+
+    /// The inclusive starting shred index of the completed data set containing this transaction.
+    pub completed_data_set_starting_shred_index: u32,
+
+    /// The exclusive ending shred index of the completed data set containing this transaction.
+    pub completed_data_set_ending_shred_index_exclusive: u32,
+}
+
 /// A wrapper to future-proof ReplicaDeshredTransactionInfo handling.
+///
+/// `V0_0_1` and `V0_0_2` retain the legacy TowerBFT vote flag. `V0_0_3` omits it.
 #[repr(u32)]
 pub enum ReplicaDeshredTransactionInfoVersions<'a> {
-    V0_0_1(&'a ReplicaDeshredTransactionInfo<'a>),
-    V0_0_2(&'a ReplicaDeshredTransactionInfoV2<'a>),
+    V0_0_1(&'a ReplicaDeshredTransactionInfo<'a>) = 0,
+    V0_0_2(&'a ReplicaDeshredTransactionInfoV2<'a>) = 1,
+    V0_0_3(&'a ReplicaDeshredTransactionInfoV3<'a>) = 2,
 }
 
 #[derive(Clone, Debug)]
@@ -955,7 +1010,7 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
     /// Check if the plugin wants address lookup table (ALT) resolution for
     /// deshred transactions. Default is false. When true, the validator will
     /// resolve V0 transaction address lookups using the rooted bank and
-    /// populate `loaded_addresses` in `ReplicaDeshredTransactionInfo`.
+    /// populate `loaded_addresses` in `ReplicaDeshredTransactionInfoV3`.
     /// This adds accounts DB I/O on the shred insertion path, so plugins
     /// that only need the raw transaction should leave this disabled.
     fn deshred_transaction_alt_resolution_enabled(&self) -> bool {
