@@ -38,23 +38,11 @@ impl StreamPolicyManager {
 
     /// Applies the stream policy to a new stream and registers it to follow
     /// future stream policies.
-    ///
-    /// Fails if a live stream with the same name is already registered.
     pub(super) fn register_new_stream(
         &mut self,
         stream: Arc<dyn PolicyControlledStream>,
     ) -> Result<(), CreateStreamError> {
         self.prune_dead_streams();
-
-        let stream_name_is_in_use = self
-            .streams
-            .iter()
-            .filter_map(Weak::upgrade)
-            .any(|registered_stream| registered_stream.stream_name() == stream.stream_name());
-
-        if stream_name_is_in_use {
-            return Err(CreateStreamError::StreamNameAlreadyInUse);
-        }
 
         let stream_rule = self.stream_policy.stream_rule(stream.stream_name());
         stream.apply_stream_rule(stream_rule)?;

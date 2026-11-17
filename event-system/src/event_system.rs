@@ -25,13 +25,10 @@ impl EventSystem {
     /// Creates an event system directory in the given path, `event_system_directory`.
     ///
     /// ### Note:
-    /// - If the directory path already exists, it must be empty.
+    /// - If the directory path already exists, it must be empty or an
+    ///   event-system directory.
     /// - This functions creates the given directory and any missing parents.
     /// - The given path is canonicalized.
-    /// - The directory is emptied once this [`EventSystem`], its clones, and
-    ///   all of its streams (including their [`PublisherFactory`]s and
-    ///   publishers) are dropped. The directory itself is left in place, and
-    ///   can be reused by a later call to [`EventSystem::new`].
     pub fn new(event_system_directory: impl AsRef<Path>) -> Result<Self, CreateEventSystemError> {
         Ok(Self {
             backend: Backend::Platform(backend::EventSystem::new(event_system_directory)?),

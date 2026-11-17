@@ -11,11 +11,13 @@ use {
     },
     shaq::broadcast::{Broadcast, BroadcastConfig, Producer},
     std::{
-        fs::{File, OpenOptions, create_dir, create_dir_all, remove_dir, remove_dir_all},
+        fs::{
+            File, OpenOptions, TryLockError, create_dir, create_dir_all, read_dir, remove_dir_all,
+        },
         io::{self, Write},
         os::{
             fd::{AsRawFd, FromRawFd},
-            unix::fs::symlink,
+            unix::fs::{OpenOptionsExt, symlink},
         },
         path::{Path, PathBuf},
         sync::{
@@ -42,6 +44,10 @@ mod subscriber;
 // Layout of the event-system directory:
 //
 // event-system-directory/
+// ├── locks/
+// │   ├── shred-events
+// │   ├── slot-events
+// │   └── transaction-events
 // ├── tmp/
 // │   └── transaction-events/
 // │       ├── queue-<id>
@@ -57,6 +63,7 @@ mod subscriber;
 const QUEUE_FILE_NAME_PREFIX: &str = "queue-";
 const SCHEMA_FILE_NAME: &str = "schema";
 
+const LOCKS_DIRECTORY_NAME: &str = "locks";
 const STAGING_DIRECTORY_NAME: &str = "tmp";
 const STREAMS_DIRECTORY_NAME: &str = "event-streams";
 
@@ -76,15 +83,15 @@ impl EventSystem {
     /// Creates an event system directory in the given path, `event_system_directory`.
     ///
     /// ### Note:
-    /// - If the directory path already exists, it must be empty.
+    /// - If the directory path already exists, it must be empty or an
+    ///   event-system directory.
     /// - This functions creates the given directory and any missing parents.
     /// - The given path is canonicalized.
-    /// - The directory is emptied once this [`EventSystem`], its clones, and
-    ///   all of its streams are dropped. The directory itself is left in place.
     pub(crate) fn new(
         event_system_directory: impl AsRef<Path>,
     ) -> Result<Self, CreateEventSystemError> {
         let event_system_directory = EventSystemDirectory::create(event_system_directory.as_ref())?;
+        event_system_directory.remove_abandoned_streams()?;
 
         Ok(Self {
             event_system_directory: Arc::new(event_system_directory),
@@ -101,9 +108,15 @@ impl EventSystem {
         stream_name: StreamName,
         stream_config: StreamConfig,
     ) -> Result<PublisherFactory<E>, CreateStreamError> {
+        let stream_name_lock = StreamNameLock::acquire(&self.event_system_directory, stream_name)?;
+
+        // clean up stream directories left behind by a previous holder of the name
+        self.event_system_directory
+            .remove_stream_directories(&stream_name_lock)?;
+
         let stream = Arc::new(EventStream::new(
             self.event_system_directory.clone(),
-            stream_name,
+            stream_name_lock,
             stream_config,
         ));
 
@@ -205,7 +218,7 @@ impl<E: Event> std::fmt::Debug for PublisherFactory<E> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("PublisherFactory")
-            .field("stream_name", &self.stream.stream_name)
+            .field("stream_name", &self.stream.stream_name_lock.stream_name)
             .finish_non_exhaustive()
     }
 }
@@ -224,11 +237,11 @@ struct EventStream<E: Event> {
     ///
     /// Publishers load it on every publish, so it is kept on its own cache line.
     queue_generation: CachePadded<AtomicU64>,
-    stream_name: StreamName,
     stream_config: StreamConfig,
     state: RwLock<StreamState<E>>,
-    /// Declared after `state`, so the queue's directory is removed before the
-    /// event-system directory layout.
+    /// Declared after `state`, so the queue's directory is removed before
+    /// another event system can claim the stream name.
+    stream_name_lock: StreamNameLock,
     event_system_directory: Arc<EventSystemDirectory>,
 }
 
@@ -236,17 +249,17 @@ impl<E: Event> EventStream<E> {
     /// Creates a disabled stream, which has no queue until a stream rule enables it.
     fn new(
         event_system_directory: Arc<EventSystemDirectory>,
-        stream_name: StreamName,
+        stream_name_lock: StreamNameLock,
         stream_config: StreamConfig,
     ) -> Self {
         Self {
             queue_generation: CachePadded::new(AtomicU64::new(0)),
-            stream_name,
             stream_config,
             state: RwLock::new(StreamState {
                 queue: None,
                 remaining_publisher_slots: stream_config.publisher_slots,
             }),
+            stream_name_lock,
             event_system_directory,
         }
     }
@@ -254,7 +267,7 @@ impl<E: Event> EventStream<E> {
 
 impl<E: Event> PolicyControlledStream for EventStream<E> {
     fn stream_name(&self) -> &StreamName {
-        &self.stream_name
+        &self.stream_name_lock.stream_name
     }
 
     fn apply_stream_rule(&self, stream_rule: StreamRule) -> Result<(), CreateStreamError> {
@@ -306,13 +319,13 @@ impl<E: Event> StreamQueue<E> {
             .event_system_directory
             .path
             .join(STREAMS_DIRECTORY_NAME)
-            .join(stream.stream_name.as_str());
+            .join(stream.stream_name_lock.stream_name.as_str());
 
         let staging_directory = stream
             .event_system_directory
             .path
             .join(STAGING_DIRECTORY_NAME)
-            .join(stream.stream_name.as_str());
+            .join(stream.stream_name_lock.stream_name.as_str());
 
         let temporary_event_stream_directory = StagingDirectory::new(staging_directory)?;
 
@@ -360,32 +373,117 @@ impl<E: Event> Drop for StreamQueue<E> {
 
 /// The directory layout of an event system.
 ///
-/// Shared by the [`EventSystem`] and its streams, so the layout is removed
-/// only after the last of them is dropped.
+/// The layout may be shared with event systems in other processes, so it is
+/// never removed. Streams only remove their own directories.
 #[derive(Debug)]
 struct EventSystemDirectory {
     path: Box<Path>,
 }
 
 impl EventSystemDirectory {
+    /// Fails if `path` holds anything other than an event-system directory, as
+    /// streams remove their own paths inside it.
     fn create(path: &Path) -> io::Result<Self> {
         create_dir_all(path)?;
         let path = path.canonicalize()?;
-        create_dir(path.join(STAGING_DIRECTORY_NAME))?;
-        if let Err(error) = create_dir(path.join(STREAMS_DIRECTORY_NAME)) {
-            let _ = remove_dir(path.join(STAGING_DIRECTORY_NAME));
-            return Err(error);
+
+        let entry_names = read_dir(&path)?
+            .map(|entry| entry.map(|entry| entry.file_name()))
+            .collect::<io::Result<Vec<_>>>()?;
+
+        const EXPECTED_DIRECTORIES: &[&str] = &[
+            LOCKS_DIRECTORY_NAME,
+            STAGING_DIRECTORY_NAME,
+            STREAMS_DIRECTORY_NAME,
+        ];
+
+        let has_expected_layout = entry_names.iter().all(|name| {
+            EXPECTED_DIRECTORIES
+                .iter()
+                .any(|layout_name| name == layout_name)
+        });
+
+        if !has_expected_layout {
+            return Err(io::Error::new(
+                io::ErrorKind::DirectoryNotEmpty,
+                "the directory is neither empty nor an event-system directory",
+            ));
         }
+
+        create_dir_all(path.join(LOCKS_DIRECTORY_NAME))?;
+        create_dir_all(path.join(STAGING_DIRECTORY_NAME))?;
+        create_dir_all(path.join(STREAMS_DIRECTORY_NAME))?;
         Ok(Self { path: path.into() })
+    }
+
+    /// Removes the streams left behind by event systems that exited without
+    /// dropping them.
+    fn remove_abandoned_streams(&self) -> io::Result<()> {
+        for entry in read_dir(self.path.join(STREAMS_DIRECTORY_NAME))? {
+            let Some(stream_name) = entry?
+                .file_name()
+                .into_string()
+                .ok()
+                .and_then(|name| StreamName::try_new(name).ok())
+            else {
+                continue;
+            };
+            // names in use are left to their holders
+            if let Ok(stream_name_lock) = StreamNameLock::acquire(self, stream_name) {
+                let _ = self.remove_stream_directories(&stream_name_lock);
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes a stream's directories.
+    fn remove_stream_directories(&self, stream_name_lock: &StreamNameLock) -> io::Result<()> {
+        for parent_directory_name in [STAGING_DIRECTORY_NAME, STREAMS_DIRECTORY_NAME] {
+            let stream_directory = self
+                .path
+                .join(parent_directory_name)
+                .join(stream_name_lock.stream_name.as_str());
+            match remove_dir_all(stream_directory) {
+                Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+                _ => {}
+            }
+        }
+        Ok(())
     }
 }
 
-impl Drop for EventSystemDirectory {
-    fn drop(&mut self) {
-        // Both directories were created by `create`, so anything left in them
-        // belongs to this event system.
-        let _ = remove_dir_all(self.path.join(STAGING_DIRECTORY_NAME));
-        let _ = remove_dir_all(self.path.join(STREAMS_DIRECTORY_NAME));
+/// An exclusive claim on a stream name in an event system's directory.
+struct StreamNameLock {
+    stream_name: StreamName,
+    _lock_file: File,
+}
+
+impl StreamNameLock {
+    /// Acquires a lock over a stream name
+    fn acquire(
+        event_system_directory: &EventSystemDirectory,
+        stream_name: StreamName,
+    ) -> Result<Self, CreateStreamError> {
+        let lock_file_path = event_system_directory
+            .path
+            .join(LOCKS_DIRECTORY_NAME)
+            .join(stream_name.as_str());
+
+        // opened read-only, so lock files created by other users can be locked too
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CREAT)
+            .open(&lock_file_path)?;
+
+        lock_file.try_lock().map_err(|error| match error {
+            TryLockError::WouldBlock => CreateStreamError::StreamNameAlreadyInUse,
+            TryLockError::Error(error) => CreateStreamError::FileSystem(error),
+        })?;
+
+        Ok(Self {
+            stream_name,
+            _lock_file: lock_file,
+        })
     }
 }
 
@@ -429,9 +527,12 @@ impl Drop for StagingDirectory {
 #[cfg(test)]
 mod tests {
     use {
-        super::{REQUIRED_SEALS, StagingDirectory, create_sealed_queue},
-        crate::{StreamConfig, event},
-        std::{io, os::fd::AsRawFd},
+        super::{
+            EventSystem, REQUIRED_SEALS, SCHEMA_FILE_NAME, STAGING_DIRECTORY_NAME,
+            STREAMS_DIRECTORY_NAME, StagingDirectory, create_sealed_queue,
+        },
+        crate::{StreamConfig, event, stream_name},
+        std::{assert_matches, io, os::fd::AsRawFd},
         tempfile::TempDir,
     };
 
@@ -470,6 +571,49 @@ mod tests {
         std::fs::write(staging.path().join("file"), b"unpublished contents").unwrap();
         drop(staging);
         assert!(!path.exists());
+    }
+
+    /// Tests the scenario where cleanup is not run, can happen with crash or sigkill,
+    /// then the stream name can be reused due to the lockfile being free.
+    #[test]
+    fn create_stream_removes_stream_left_behind_by_previous_holder() {
+        let stream_name = stream_name!("test-stream");
+        let directory = TempDir::new().unwrap();
+        let event_system = EventSystem::new(directory.path()).unwrap();
+        event_system.set_stream_policy("on".parse().unwrap());
+        for parent_directory_name in [STAGING_DIRECTORY_NAME, STREAMS_DIRECTORY_NAME] {
+            let stale_stream_directory = directory
+                .path()
+                .join(parent_directory_name)
+                .join(stream_name.as_str());
+            std::fs::create_dir_all(&stale_stream_directory).unwrap();
+            std::fs::write(
+                stale_stream_directory.join(SCHEMA_FILE_NAME),
+                b"stale schema",
+            )
+            .unwrap();
+        }
+
+        assert_matches!(
+            event_system.create_stream::<TestEvent>(stream_name, TEST_CONFIG),
+            Ok(_)
+        )
+    }
+
+    #[test]
+    fn new_event_system_removes_streams_left_behind_by_previous_holders() {
+        let stream_name = stream_name!("test-stream");
+        let directory = TempDir::new().unwrap();
+        EventSystem::new(directory.path()).unwrap();
+        let stale_stream_directory = directory
+            .path()
+            .join(STREAMS_DIRECTORY_NAME)
+            .join(stream_name.as_str());
+        std::fs::create_dir(&stale_stream_directory).unwrap();
+
+        let _event_system = EventSystem::new(directory.path()).unwrap();
+
+        assert!(!stale_stream_directory.exists());
     }
 
     #[test]
