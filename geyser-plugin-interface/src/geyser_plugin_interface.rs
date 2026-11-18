@@ -474,6 +474,23 @@ pub struct ReplicaBlockInfoV5<'a> {
     pub entry_count: u64,
 }
 
+/// Information about a block, including its block ID when available.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct ReplicaBlockInfoV6<'a> {
+    pub parent_slot: Slot,
+    pub parent_blockhash: &'a str,
+    pub slot: Slot,
+    pub blockhash: &'a str,
+    pub rewards: &'a RewardsAndNumPartitions<'a>,
+    pub block_time: Option<UnixTimestamp>,
+    pub block_height: Option<u64>,
+    pub executed_transaction_count: u64,
+    pub entry_count: u64,
+    /// The block ID can be `None` for a leader block still being shredded.
+    pub block_id: Option<Hash>,
+}
+
 /// `V0_0_1` through `V0_0_4` carried `solana_transaction_status` reward
 /// types and shipped through v4.3; they were removed when the payload
 /// became the `transaction_status_meta` mirror types. The explicit
@@ -481,6 +498,7 @@ pub struct ReplicaBlockInfoV5<'a> {
 #[repr(u32)]
 pub enum ReplicaBlockInfoVersions<'a> {
     V0_0_5(&'a ReplicaBlockInfoV5<'a>) = 4,
+    V0_0_6(&'a ReplicaBlockInfoV6<'a>) = 5,
 }
 
 /// A snapshot of a validator's gossip contact info at a point in time.
@@ -1043,6 +1061,33 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
 #[cfg(test)]
 mod tests {
     use {super::*, std::sync::Mutex};
+
+    #[test]
+    fn test_block_metadata_v6_block_id() {
+        let rewards = RewardsAndNumPartitions {
+            rewards: &[],
+            num_partitions: None,
+        };
+        for block_id in [None, Some(Hash::new_from_array([1; 32]))] {
+            let block = ReplicaBlockInfoV6 {
+                parent_slot: 41,
+                parent_blockhash: "parent",
+                slot: 42,
+                blockhash: "block",
+                rewards: &rewards,
+                block_time: None,
+                block_height: None,
+                executed_transaction_count: 0,
+                entry_count: 0,
+                block_id,
+            };
+            let ReplicaBlockInfoVersions::V0_0_6(info) = ReplicaBlockInfoVersions::V0_0_6(&block)
+            else {
+                panic!("expected V6 block metadata");
+            };
+            assert_eq!(info.block_id, block_id);
+        }
+    }
 
     #[derive(Debug, Default)]
     struct LegacyPlugin(Mutex<Vec<SlotStatus>>);
