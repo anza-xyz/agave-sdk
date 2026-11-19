@@ -254,6 +254,38 @@ pub enum ReplicaTransactionInfoVersions<'a> {
     V0_0_5(&'a ReplicaTransactionInfoV5<'a>) = 4,
 }
 
+/// A locally executed transaction accepted by the leader's recorder.
+/// Account changes may not yet be committed. This is not a consensus confirmation.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub struct ReplicaLeaderTransactionInfo<'a> {
+    /// Canonical wire bytes, including signatures, for legacy, v0 or v1 transactions.
+    pub transaction: &'a [u8],
+    /// The result of processing, including fees-only and other recorded failures.
+    pub status: std::result::Result<(), &'a solana_transaction_error::TransactionError>,
+    /// Index within this bank's recorded transactions. A replacement bank starts at zero.
+    pub index: usize,
+}
+
+#[repr(u32)]
+pub enum ReplicaLeaderTransactionInfoVersions<'a> {
+    V0_0_1(&'a ReplicaLeaderTransactionInfo<'a>) = 0,
+}
+
+/// Lifecycle of a locally produced bank, scoped by the callback's bank ID.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u32)]
+pub enum LeaderBankStatus {
+    /// Recording can begin. This is queued before this bank's transactions.
+    Created = 0,
+    /// The bank froze. `transaction_count` is the expected number of recorded transactions.
+    Frozen { transaction_count: u64 } = 1,
+    /// Production was abandoned, including replacement after a parent change.
+    /// All observations from this bank must be discarded. This may follow Frozen if
+    /// the bank is subsequently abandoned and is not a consensus finality signal.
+    Abandoned { transaction_count: u64 } = 2,
+}
+
 /// Information about a transaction after deshredding (when entries are formed from shreds).
 /// This is sent before any execution occurs.
 /// Unlike ReplicaTransactionInfo, this does not include TransactionStatusMeta
@@ -837,6 +869,57 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
         self.notify_transaction(transaction, slot)
     }
 
+    /// Called for locally executed transactions after successful recording and before
+    /// or after account commit, depending on dispatch timing. This separate feed does
+    /// not change `notify_transaction_for_bank` or imply confirmation by consensus.
+    ///
+    /// Delivery is asynchronous and best effort. Concurrent batches can arrive out of
+    /// index order. Use `(bank_id, index)` to order them. Lifecycle events and loss
+    /// reports use the same dispatcher. A slow plugin can cause queue drops.
+    /// Bank IDs are local to a validator process, so consumers must also identify the
+    /// source and restart session. Reloaded plugins can begin in the middle of a bank.
+    #[allow(unused_variables)]
+    fn notify_leader_transaction(
+        &self,
+        transaction: ReplicaLeaderTransactionInfoVersions,
+        slot: Slot,
+        bank_id: BankId,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Called for local leader lifecycle events. A delivered terminal event follows
+    /// all delivered transactions for that bank. Any event, including this one, can
+    /// be lost under backpressure. Reconcile with normal bank/consensus notifications.
+    #[allow(unused_variables)]
+    fn notify_leader_bank_status(
+        &self,
+        slot: Slot,
+        parent: Slot,
+        bank_id: BankId,
+        status: LeaderBankStatus,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Cumulative queue drops since this validator's leader dispatcher started.
+    /// These counts report local losses across all banks, not a bank-specific gap or
+    /// acknowledgement of downstream delivery. They are retried after callback errors.
+    #[allow(unused_variables)]
+    fn notify_leader_notification_loss(
+        &self,
+        dropped_transactions: u64,
+        dropped_bank_statuses: u64,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// Opt in to leader transactions, lifecycle events and loss reports. Default false.
+    /// Plugin transport and downstream backpressure are the plugin's responsibility.
+    fn leader_transaction_notifications_enabled(&self) -> bool {
+        false
+    }
+
     /// Called when an entry is executed.
     #[deprecated(
         since = "4.3.0",
@@ -1061,6 +1144,25 @@ mod tests {
             self.0.lock().unwrap().push(status.clone());
             Ok(())
         }
+    }
+
+    #[test]
+    fn test_leader_callbacks_default_to_disabled() {
+        let plugin = LegacyPlugin::default();
+        assert!(!plugin.leader_transaction_notifications_enabled());
+        let info = ReplicaLeaderTransactionInfo {
+            transaction: &[],
+            status: Ok(()),
+            index: 0,
+        };
+        plugin
+            .notify_leader_transaction(ReplicaLeaderTransactionInfoVersions::V0_0_1(&info), 42, 7)
+            .unwrap();
+        plugin
+            .notify_leader_bank_status(42, 41, 7, LeaderBankStatus::Created)
+            .unwrap();
+        plugin.notify_leader_notification_loss(3, 1).unwrap();
+        assert!(plugin.0.lock().unwrap().is_empty());
     }
 
     #[test]
