@@ -195,6 +195,22 @@ pub enum ReplicaAccountInfoVersions<'a> {
     V0_0_5(&'a ReplicaAccountInfoV5<'a>),
 }
 
+/// The expected number of live account updates for a frozen bank.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(C)]
+pub struct ReplicaAccountUpdateCount {
+    pub slot: Slot,
+    /// Counts writes, including repeated writes to the same account and zero-lamport writes.
+    /// This includes bank construction and freeze-time writes, but not snapshot notifications.
+    pub account_update_count: u64,
+}
+
+/// Versioned payload for [`GeyserPlugin::notify_account_update_count`].
+#[repr(u32)]
+pub enum ReplicaAccountUpdateCountVersions<'a> {
+    V0_0_1(&'a ReplicaAccountUpdateCount),
+}
+
 /// Information about a transaction, including index in block
 #[derive(Clone, Debug)]
 #[repr(C)]
@@ -749,6 +765,31 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
         self.update_account(account, slot, false)
     }
 
+    /// Called once when a bank freezes, after its live account-update callbacks have returned.
+    /// Only called when [`Self::account_update_count_notifications_enabled`] returns true.
+    /// This includes freeze-time writes and banks replayed at startup. Restoring an already
+    /// frozen bank from a snapshot does not produce this notification.
+    ///
+    /// A plugin receiving all raw updates from bank creation can compare this count with its
+    /// distinct `write_version` values for this `bank_id`. Repeated delivery of an update must
+    /// count once. Check before filtering or keeping only the latest update per account.
+    /// A plugin loaded partway through a bank has an incomplete view. Scope bank IDs and write
+    /// versions to the validator process that produced them, including across reconnects.
+    ///
+    /// Plugins that queue updates asynchronously must preserve this completion boundary for
+    /// consumers. A missing notification or partial feed cannot establish completeness.
+    /// Comparing counts detects loss under deduplicated delivery of genuine updates. It does
+    /// not verify account contents or prove consensus correctness. The bank can still be
+    /// marked dead later, so this notification does not imply confirmation or finality.
+    #[allow(unused_variables)]
+    fn notify_account_update_count(
+        &self,
+        count: ReplicaAccountUpdateCountVersions,
+        bank_id: BankId,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     /// Called when all accounts are notified of during startup.
     fn notify_end_of_startup(&self) -> Result<()> {
         Ok(())
@@ -950,6 +991,12 @@ pub trait GeyserPlugin: Any + Send + Sync + std::fmt::Debug {
         true
     }
 
+    /// Whether to receive the expected account-update count when a bank freezes.
+    /// Disabled by default. This does not enable account data notifications.
+    fn account_update_count_notifications_enabled(&self) -> bool {
+        false
+    }
+
     /// Check if the plugin is interested in account data from snapshot
     /// Default is true -- if the plugin is not interested in
     /// account data snapshot, please return false because startup would be
@@ -1061,6 +1108,20 @@ mod tests {
             self.0.lock().unwrap().push(status.clone());
             Ok(())
         }
+    }
+
+    #[test]
+    fn test_account_update_count_defaults() {
+        let plugin = LegacyPlugin::default();
+        assert!(!plugin.account_update_count_notifications_enabled());
+        let count = ReplicaAccountUpdateCount {
+            slot: 42,
+            account_update_count: 3,
+        };
+        plugin
+            .notify_account_update_count(ReplicaAccountUpdateCountVersions::V0_0_1(&count), 7)
+            .unwrap();
+        assert!(plugin.0.lock().unwrap().is_empty());
     }
 
     #[test]
